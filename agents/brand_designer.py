@@ -200,8 +200,8 @@ Always prioritize understanding the user's needs before making suggestions."""
             agent=AgentType.CONVERSATIONAL_REACT_DESCRIPTION,
             memory=self.memory,
             verbose=True,
-            agent_kwargs={
-                'system_message': """You are Zara, a professional brand designer assistant who helps users create logos and develop brand identities.
+              agent_kwargs={
+        'system_message': """You are Zara, a professional brand designer assistant who helps users create logos and develop brand identities.
 
 Your capabilities:
 - Logo design and generation using DALL-E
@@ -211,23 +211,23 @@ Your capabilities:
 
 When users mention wanting a logo, creating a logo, designing a brand, or anything related to logo generation, immediately use the Generate_Logo_with_DALLE tool.
 
+CRITICAL INSTRUCTION: When the tool returns a response that starts with "LOGO_GENERATED|", you MUST return that EXACT response without any modifications, additions, or formatting changes. Do not convert it to markdown, do not add explanations, just return the exact string as-is.
+
+Examples:
+- If tool returns: "LOGO_GENERATED|https://image-url|message"
+- You return: "LOGO_GENERATED|https://image-url|message" (EXACTLY)
+
+For all other responses, be conversational and friendly.
+
 Key guidelines:
 - Always use the tool for logo-related requests
-- Be conversational and friendly
+- NEVER modify LOGO_GENERATED responses
 - Trust the tool to handle information collection and generation
-- The tool will ask for missing information automatically
-- Focus on being helpful and creative
-
-Examples of when to use the tool:
-- "I need a logo"
-- "Create a logo for my business"
-- "Design something for my brand"
-- "Generate a logo"
-- "Help me with branding"
+- Focus on being helpful and creative for non-logo conversations
 
 Always prioritize using the tool over giving generic advice."""
-            }
-        )
+    }
+    )
 
     def extract_brand_info_from_conversation(self, messages):
         """Use GPT to intelligently extract brand information from conversation"""
@@ -663,6 +663,19 @@ Always prioritize using the tool over giving generic advice."""
             print(f"[DEBUG] Using LangChain agent with DALL-E tools")
             ai_response = self.agent.run(query)
             
+            # CRITICAL FIX: Check if LangChain corrupted a LOGO_GENERATED response
+            if self.last_generated_image and "LOGO_GENERATED|" not in ai_response:
+                print(f"[DEBUG] LangChain corrupted the LOGO_GENERATED response")
+                print(f"[DEBUG] Original response: {ai_response}")
+                
+                # Extract the image URL from the corrupted response
+                if self.last_generated_image in ai_response or "[Logo](" in ai_response:
+                    # Reconstruct the proper format
+                    success_message = f"🎉 **Your {self.design_info.get('brand_name', 'brand')} logo is ready!**\n\nI've created a {self.design_info.get('logo_type', 'professional')} design that perfectly captures your brand identity for {self.design_info.get('target_audience', 'your audience')}. The design uses {self.design_info.get('color_palette', 'professional colors')} to create a professional and memorable look."
+                    
+                    ai_response = f"LOGO_GENERATED|{self.last_generated_image}|{success_message}"
+                    print(f"[DEBUG] Reconstructed proper format: {ai_response}")
+            
         except Exception as e:
             print(f"LangChain agent error: {e}, falling back to OpenAI direct")
             
@@ -721,6 +734,8 @@ Always prioritize using the tool over giving generic advice."""
         store_in_pinecone("brand-designer", "assistant", ai_response)
         
         return ai_response
+    
+    
 
     def handle_query_with_context(self, query: str, previous_messages: list = None, context: str = None):
         """Handle user query with conversation context"""
