@@ -236,9 +236,9 @@ Always prioritize using the tool over giving generic advice."""
     def extract_brand_info_from_conversation(self, messages):
         """Use GPT to intelligently extract brand information from conversation"""
         
-        # Build conversation text
+        # Build conversation text - include ALL messages, not just recent ones for brand name extraction
         conversation_text = ""
-        for msg in messages[-5:]:  # Only last 5 messages for more focused extraction
+        for msg in messages:  # Use ALL messages to catch brand names mentioned earlier
             role = "User" if msg['sender'] == 'user' else "Assistant"
             conversation_text += f"{role}: {msg['text']}\n"
         
@@ -248,42 +248,44 @@ Always prioritize using the tool over giving generic advice."""
         
         print(f"[DEBUG] Extracting from conversation: {conversation_text}")
         
-        # Enhanced extraction prompt - FIXED: No f-string with JSON braces
+        # Enhanced extraction prompt that looks for brand names throughout the conversation
         extraction_prompt = f"""
-        Analyze this conversation and extract brand information. Pay special attention to NEW brand mentions.
+        Analyze this FULL conversation and extract brand information. Look for brand names mentioned ANYWHERE in the conversation.
         
         Conversation:
         {conversation_text}
 
         IMPORTANT RULES:
-        1. If user mentions "other brand", "another brand", "different brand" - they want to work on a NEW brand
-        2. If user gives a specific brand name, use that exact name
-        3. If working on a new brand, RESET all fields except what's explicitly mentioned
-        4. Look for asset type clues (poster, logo, banner, instagram, linkedin, etc.)
+        1. Look for brand names mentioned ANYWHERE in the conversation (not just the last message)
+        2. If user mentions "other brand", "another brand", "different brand" - they want to work on a NEW brand
+        3. If user gives a specific brand name, use that exact name
+        4. If working on a new brand, RESET all fields except what's explicitly mentioned
+        5. Look for asset type clues (poster, logo, banner, instagram, linkedin, etc.)
 
         ASSET TYPE MAPPING:
         - "instagram poster" OR "instagram post" → "instagram_post"  
         - "linkedin poster" OR "linkedin cover" → "linkedin_cover"
         - "facebook poster" OR "facebook cover" → "facebook_cover"
+        - "logo design" OR "logo" → "logo"
         - Generic "poster" without platform → "poster"
 
-        Extract these fields:
-        - brand_name: The brand name (if "other brand" mentioned, ask for the actual name)
+        Extract these fields by looking through the ENTIRE conversation:
+        - brand_name: The brand name mentioned ANYWHERE (look carefully!)
         - logo_type: Style mentioned for ANY asset type
         - target_audience: Who they're targeting
         - color_palette: Colors mentioned
-        - asset_type: What type of asset they want (instagram_post, linkedin_cover, poster, logo, etc.)
+        - asset_type: What type of asset they want (logo, instagram_post, linkedin_cover, poster, etc.)
         - is_new_brand: true if they mentioned "other brand", "another brand", etc.
 
         CRITICAL: Return ONLY valid JSON, no markdown formatting, no explanations.
-        Format: {{"brand_name": "exact name or null", "logo_type": "extracted style or null", "target_audience": "extracted audience or null", "color_palette": "extracted colors or null", "asset_type": "instagram_post/linkedin_cover/poster/logo/etc or null", "is_new_brand": true/false}}
+        Format: {{"brand_name": "exact name found in conversation or null", "logo_type": "extracted style or null", "target_audience": "extracted audience or null", "color_palette": "extracted colors or null", "asset_type": "logo/instagram_post/linkedin_cover/poster/etc or null", "is_new_brand": true/false}}
         """
         
         try:
             response = openai_client.chat.completions.create(
                 model="gpt-4",
                 messages=[
-                    {"role": "system", "content": "Extract brand information and detect asset types. Map 'instagram poster' to 'instagram_post'. Return ONLY valid JSON with no markdown formatting."},
+                    {"role": "system", "content": "Extract brand information from the FULL conversation. Look for brand names mentioned anywhere. Return ONLY valid JSON with no markdown formatting."},
                     {"role": "user", "content": extraction_prompt}
                 ],
                 temperature=0.1,
@@ -332,6 +334,36 @@ Always prioritize using the tool over giving generic advice."""
             print(f"[DEBUG] Extraction error: {e}")
             if 'extracted_text' in locals():
                 print(f"[DEBUG] Raw extraction text: {extracted_text}")
+
+            # Enhanced fallback - manually search for brand names in conversation
+            print("[DEBUG] Using fallback brand name extraction")
+            for msg in messages:
+                text = msg['text'].lower()
+                
+                # Look for patterns like "brand name is X" or "my brand is X"
+                import re
+                brand_patterns = [
+                    r"brand name is (\w+)",
+                    r"my brand is (\w+)", 
+                    r"brand called (\w+)",
+                    r"company name is (\w+)",
+                    r"business name is (\w+)",
+                    r"for (\w+)\b",  # Simple pattern for brand names
+                ]
+                
+                for pattern in brand_patterns:
+                    match = re.search(pattern, text)
+                    if match:
+                        brand_name = match.group(1)
+                        if brand_name not in ['a', 'the', 'my', 'our', 'is', 'are', 'logo', 'design']:
+                            self.design_info['brand_name'] = brand_name
+                            print(f"[DEBUG] Fallback extracted brand name: {brand_name}")
+                            break
+                
+                # Look for asset type mentions
+                if 'logo' in text:
+                    self.detected_asset_type = 'logo'
+                    print(f"[DEBUG] Fallback detected asset type: logo")
     
     def intelligent_auto_complete(self, provided_info: dict, asset_type: str = "logo"):
         """Enhanced auto-completion with asset-type awareness"""
@@ -626,7 +658,7 @@ Always prioritize using the tool over giving generic advice."""
         recent_messages = []
         if self.conversation_id and self.user_id:
             messages = MongoDB.get_conversation_messages(self.conversation_id, self.user_id)
-            recent_messages = messages[-5:]
+            recent_messages = messages
             print(f"[DEBUG] Found {len(recent_messages)} recent messages")
         
         # Extract information (this now handles brand switching)
