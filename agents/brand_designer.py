@@ -236,9 +236,9 @@ Always prioritize using the tool over giving generic advice."""
     def extract_brand_info_from_conversation(self, messages):
         """Use GPT to intelligently extract brand information from conversation"""
         
-        # Build conversation text - include ALL messages, not just recent ones for brand name extraction
+        # Build FULL conversation text - ALL messages, not just recent
         conversation_text = ""
-        for msg in messages:  # Use ALL messages to catch brand names mentioned earlier
+        for msg in messages:
             role = "User" if msg['sender'] == 'user' else "Assistant"
             conversation_text += f"{role}: {msg['text']}\n"
         
@@ -246,46 +246,44 @@ Always prioritize using the tool over giving generic advice."""
             print("[DEBUG] No conversation history to extract from")
             return
         
-        print(f"[DEBUG] Extracting from conversation: {conversation_text}")
+        print(f"[DEBUG] Extracting from FULL conversation: {conversation_text}")
         
-        # Enhanced extraction prompt that looks for brand names throughout the conversation
+        # Enhanced extraction with brand switching detection
         extraction_prompt = f"""
-        Analyze this FULL conversation and extract brand information. Look for brand names mentioned ANYWHERE in the conversation.
+        Analyze this COMPLETE conversation and extract brand information. 
+        CRITICAL: Detect when user mentions a DIFFERENT brand name than previously discussed.
         
         Conversation:
         {conversation_text}
 
-        IMPORTANT RULES:
-        1. Look for brand names mentioned ANYWHERE in the conversation (not just the last message)
-        2. If user mentions "other brand", "another brand", "different brand" - they want to work on a NEW brand
-        3. If user gives a specific brand name, use that exact name
-        4. If working on a new brand, RESET all fields except what's explicitly mentioned
-        5. Look for asset type clues (poster, logo, banner, instagram, linkedin, etc.)
+        BRAND NAME CHANGE DETECTION RULES:
+        1. If user says "but my brand name is X" - they are CORRECTING the brand name
+        2. If user says "my brand is X" after talking about different brand - BRAND CHANGE
+        3. If user mentions "AllMyAi" after discussing "FashFoo" - BRAND CHANGE
+        4. Always use the MOST RECENT brand name mentioned
+        5. When brand changes, RESET all other fields (logo_type, colors, etc.)
 
-        ASSET TYPE MAPPING:
-        - "instagram poster" OR "instagram post" → "instagram_post"  
-        - "linkedin poster" OR "linkedin cover" → "linkedin_cover"
-        - "facebook poster" OR "facebook cover" → "facebook_cover"
-        - "logo design" OR "logo" → "logo"
-        - Generic "poster" without platform → "poster"
+        BRAND SWITCHING PATTERNS:
+        - "but my brand name is [Name]" = CORRECTION
+        - "my brand is [Name]" = POSSIBLE SWITCH  
+        - "for [BrandName]" = CURRENT BRAND
+        - "[BrandName] logo" = CURRENT BRAND
 
-        Extract these fields by looking through the ENTIRE conversation:
-        - brand_name: The brand name mentioned ANYWHERE (look carefully!)
-        - logo_type: Style mentioned for ANY asset type
-        - target_audience: Who they're targeting
-        - color_palette: Colors mentioned
-        - asset_type: What type of asset they want (logo, instagram_post, linkedin_cover, poster, etc.)
-        - is_new_brand: true if they mentioned "other brand", "another brand", etc.
+        Extract the MOST RECENT brand information:
+        - brand_name: The latest brand name mentioned (prioritize corrections)
+        - asset_type: What they want to create (logo, instagram_post, etc.)
+        - is_new_brand: true if brand name is different from what was discussed earlier
+        - Other fields: Only keep if they're for the CURRENT brand
 
-        CRITICAL: Return ONLY valid JSON, no markdown formatting, no explanations.
-        Format: {{"brand_name": "exact name found in conversation or null", "logo_type": "extracted style or null", "target_audience": "extracted audience or null", "color_palette": "extracted colors or null", "asset_type": "logo/instagram_post/linkedin_cover/poster/etc or null", "is_new_brand": true/false}}
+        Return ONLY valid JSON:
+        {{"brand_name": "most recent brand name or null", "asset_type": "logo/instagram_post/etc or null", "is_new_brand": true/false, "logo_type": null, "target_audience": null, "color_palette": null}}
         """
         
         try:
             response = openai_client.chat.completions.create(
                 model="gpt-4",
                 messages=[
-                    {"role": "system", "content": "Extract brand information from the FULL conversation. Look for brand names mentioned anywhere. Return ONLY valid JSON with no markdown formatting."},
+                    {"role": "system", "content": "Detect brand name changes in conversations. When user says 'but my brand name is X', this is a brand correction. Return ONLY valid JSON."},
                     {"role": "user", "content": extraction_prompt}
                 ],
                 temperature=0.1,
@@ -295,7 +293,7 @@ Always prioritize using the tool over giving generic advice."""
             extracted_text = response.choices[0].message.content.strip()
             print(f"[DEBUG] GPT extraction result: {extracted_text}")
             
-            # Clean up any markdown formatting
+            # Clean up markdown
             if extracted_text.startswith('```json'):
                 extracted_text = extracted_text.replace('```json', '').replace('```', '').strip()
             elif extracted_text.startswith('```'):
@@ -304,9 +302,18 @@ Always prioritize using the tool over giving generic advice."""
             import json
             extracted_info = json.loads(extracted_text)
             
-            # If it's a new brand, reset design_info
+            # Check if this is a brand change
+            current_brand = self.design_info.get('brand_name')
+            new_brand = extracted_info.get('brand_name')
+            
+            # BRAND CHANGE DETECTION
+            if new_brand and current_brand and new_brand.lower() != current_brand.lower():
+                print(f"[DEBUG] BRAND CHANGE DETECTED: {current_brand} → {new_brand}")
+                extracted_info['is_new_brand'] = True
+            
+            # If brand changed or explicitly marked as new brand, RESET everything
             if extracted_info.get("is_new_brand"):
-                print("[DEBUG] New brand detected, resetting design_info")
+                print("[DEBUG] Resetting design_info for new brand")
                 self.design_info = {
                     "brand_name": None,
                     "logo_type": None,
@@ -317,54 +324,65 @@ Always prioritize using the tool over giving generic advice."""
                     "preferred_fonts": None,
                 }
             
-            # Update design_info with extracted information
+            # Update with new brand information
             for key, value in extracted_info.items():
                 if key in self.design_info and value and value.lower() not in ["null", "", "none"]:
                     self.design_info[key] = value
-                    print(f"[DEBUG] Set {key}: {value}")
+                    print(f"[DEBUG] Updated {key}: {value}")
             
-            # Store asset type separately
+            # Store asset type
             if extracted_info.get("asset_type"):
                 self.detected_asset_type = extracted_info["asset_type"]
-                print(f"[DEBUG] Detected asset type from conversation: {self.detected_asset_type}")
+                print(f"[DEBUG] Detected asset type: {self.detected_asset_type}")
             
-            print(f"[DEBUG] Updated design_info: {self.design_info}")
+            print(f"[DEBUG] Final design_info: {self.design_info}")
             
         except Exception as e:
             print(f"[DEBUG] Extraction error: {e}")
-            if 'extracted_text' in locals():
-                print(f"[DEBUG] Raw extraction text: {extracted_text}")
-
-            # Enhanced fallback - manually search for brand names in conversation
-            print("[DEBUG] Using fallback brand name extraction")
-            for msg in messages:
+            
+            # MANUAL FALLBACK - Look for brand names in ALL messages
+            print("[DEBUG] Using manual brand name search")
+            for msg in reversed(messages):  # Start from most recent
                 text = msg['text'].lower()
                 
-                # Look for patterns like "brand name is X" or "my brand is X"
                 import re
-                brand_patterns = [
-                    r"brand name is (\w+)",
-                    r"my brand is (\w+)", 
-                    r"brand called (\w+)",
-                    r"company name is (\w+)",
-                    r"business name is (\w+)",
-                    r"for (\w+)\b",  # Simple pattern for brand names
+                patterns = [
+                    r"but my brand name is (\w+)",
+                    r"my brand name is (\w+)",  
+                    r"my brand is (\w+)",
+                    r"brand (\w+)",
+                    r"(\w+) logo"
                 ]
                 
-                for pattern in brand_patterns:
+                for pattern in patterns:
                     match = re.search(pattern, text)
                     if match:
-                        brand_name = match.group(1)
-                        if brand_name not in ['a', 'the', 'my', 'our', 'is', 'are', 'logo', 'design']:
-                            self.design_info['brand_name'] = brand_name
-                            print(f"[DEBUG] Fallback extracted brand name: {brand_name}")
-                            break
-                
-                # Look for asset type mentions
-                if 'logo' in text:
-                    self.detected_asset_type = 'logo'
-                    print(f"[DEBUG] Fallback detected asset type: logo")
-    
+                        found_brand = match.group(1).title()  # Capitalize
+                        current_brand = self.design_info.get('brand_name')
+                        
+                        # Skip common words
+                        if found_brand.lower() in ['the', 'my', 'our', 'logo', 'design']:
+                            continue
+                        
+                        # If different from current, reset
+                        if current_brand and found_brand != current_brand:
+                            print(f"[DEBUG] Manual brand change: {current_brand} → {found_brand}")
+                            self.design_info = {
+                                "brand_name": found_brand,
+                                "logo_type": None,
+                                "target_audience": None,
+                                "color_palette": None,
+                                "brand_personality": None,
+                                "industry": None,
+                                "preferred_fonts": None,
+                            }
+                            return
+                        
+                        self.design_info['brand_name'] = found_brand
+                        print(f"[DEBUG] Manual extraction: {found_brand}")
+                        return
+
+
     def intelligent_auto_complete(self, provided_info: dict, asset_type: str = "logo"):
         """Enhanced auto-completion with asset-type awareness"""
         
@@ -632,19 +650,64 @@ Always prioritize using the tool over giving generic advice."""
             return any(phrase in user_input.lower() for phrase in generation_keywords)
 
     def smart_asset_generator(self, user_input: str = "") -> str:
-        """Smart brand asset generation supporting multiple asset types"""
+        """Smart brand asset generation with better brand switching"""
         
         print(f"[DEBUG] smart_asset_generator called with input: '{user_input}'")
         print(f"[DEBUG] Initial design_info: {self.design_info}")
         
-        # Store the original user input as context
-        self.user_context = user_input
+        # ENHANCED IMMEDIATE BRAND NAME CHANGE CHECK
+        if user_input:
+            user_lower = user_input.lower()
+            
+            # More comprehensive brand change patterns
+            brand_change_patterns = [
+                (r"but my brand name is (\w+)", "correction"),
+                (r"my brand name is (\w+)", "declaration"),
+                (r"my brand is (\w+)", "declaration"),
+                (r"brand called (\w+)", "specification"),
+                (r"for my brand (\w+)", "specification"),
+                (r"(\w+) logo", "implicit_brand"),
+            ]
+            
+            for pattern, intent in brand_change_patterns:
+                import re
+                match = re.search(pattern, user_lower)
+                if match:
+                    new_brand_name = match.group(1).title()
+                    current_brand = self.design_info.get('brand_name')
+                    
+                    # Skip common words
+                    if new_brand_name.lower() in ['the', 'my', 'our', 'logo', 'design', 'create', 'generate']:
+                        continue
+                    
+                    # Check if this is actually a brand change
+                    if current_brand and new_brand_name.lower() != current_brand.lower():
+                        print(f"[DEBUG] IMMEDIATE brand change detected ({intent}): {current_brand} → {new_brand_name}")
+                        
+                        # RESET everything for new brand
+                        self.design_info = {
+                            "brand_name": new_brand_name,
+                            "logo_type": None,
+                            "target_audience": None,
+                            "color_palette": None,
+                            "brand_personality": None,
+                            "industry": None,
+                            "preferred_fonts": None,
+                        }
+                        print(f"[DEBUG] Reset design_info for new brand: {self.design_info}")
+                        break
+                    elif not current_brand:
+                        # No current brand, set the new one
+                        self.design_info['brand_name'] = new_brand_name
+                        print(f"[DEBUG] Set initial brand name: {new_brand_name}")
+                        break
         
-        # Initialize detected asset type
+        
+        self.user_context = user_input
         self.detected_asset_type = None
         conversation_detected_type = None
         
-        # Clean up user input for processing but keep original for context
+        # Process input...
         processed_input = user_input
         if user_input.startswith('{"') and user_input.endswith('}'):
             try:
@@ -654,24 +717,25 @@ Always prioritize using the tool over giving generic advice."""
             except:
                 pass
         
-        # Get conversation context  
+        # Get ALL conversation messages (not just recent)
         recent_messages = []
         if self.conversation_id and self.user_id:
             messages = MongoDB.get_conversation_messages(self.conversation_id, self.user_id)
-            recent_messages = messages
-            print(f"[DEBUG] Found {len(recent_messages)} recent messages")
+            recent_messages = messages  # Use ALL messages
+            print(f"[DEBUG] Found {len(recent_messages)} total messages for analysis")
         
-        # Extract information (this now handles brand switching)
+        # Extract information from FULL conversation
         if recent_messages:
             self.extract_brand_info_from_conversation(recent_messages)
             conversation_detected_type = getattr(self, 'detected_asset_type', None)
             print(f"[DEBUG] Conversation detected type: {conversation_detected_type}")
         
+        # Continue with existing logic for asset generation...
         if processed_input and processed_input.strip():
             self.extract_from_current_input(processed_input)
             current_detected_type = getattr(self, 'detected_asset_type', None)
             print(f"[DEBUG] Current input detected type: {current_detected_type}")
-        
+    
         # PRIORITY LOGIC: Use conversation detection if it exists, otherwise use current input
         if conversation_detected_type:
             final_asset_type = conversation_detected_type
@@ -684,6 +748,10 @@ Always prioritize using the tool over giving generic advice."""
             asset_info = self.detect_asset_type_and_specs(processed_input)
             final_asset_type = asset_info["type"]
             print(f"[DEBUG] Using GPT fallback detection: {final_asset_type}")
+        
+        # Handle consultancy requests (no specific brand)
+        if final_asset_type == "consultancy":
+            return self.provide_brand_consultancy(user_input)
         
         # Get dimensions for the detected type
         type_to_dimensions = {
@@ -746,64 +814,90 @@ Always prioritize using the tool over giving generic advice."""
         # Asset-specific information collection
         return self.collect_asset_info(asset_type, missing_info, provided_info)
     
-    def detect_asset_type_and_specs(self, user_input: str) -> dict:
-        """Use GPT to intelligently detect asset type and specifications"""
+
+
+    def provide_brand_consultancy(self, user_input: str) -> str:
+        """Provide brand consultancy advice without generating assets"""
         
-        # FIXED: No f-string with JSON braces
-        detection_prompt = f"""
-        Analyze this user input and determine what type of visual asset they want to create.
+        consultancy_prompt = f"""
+        The user is asking for brand consultancy advice. Provide expert recommendations.
         
-        User input: "{user_input}"
+        User request: "{user_input}"
         
-        Available asset types and their optimal dimensions:
+        Analyze the request and provide detailed, professional advice with specific recommendations.
         
-        LOGOS:
-        - logo: 1024x1024 (general logos, brand marks)
+        Format your response as expert consultancy advice with:
+        1. Direct answer to their question
+        2. Specific recommendations with examples
         
-        SOCIAL MEDIA:
-        - instagram_post: 1080x1080 (square posts)
-        - instagram_story: 1080x1920 (vertical stories)
-        - linkedin_cover: 1584x396 (profile banner)
-        - facebook_cover: 1200x630 (page cover)
-        - youtube_thumbnail: 1280x720 (video thumbnails)
-        - twitter_header: 1500x500 (profile header)
-        
-        MARKETING:
-        - poster: 1080x1350 (promotional posters, flyers)
-        - brochure: 1080x1350 (informational materials)
-        
-        BUSINESS:
-        - business_card: 1050x600 (contact cards)
-        - letterhead: 1080x1400 (company stationery)
-        
-        WEB:
-        - web_banner: 1200x600 (website headers)
-        - email_signature: 600x200 (email footers)
-        
-        Rules for detection:
-        1. Look for specific mentions (e.g., "Instagram post" → instagram_post)
-        2. Consider context clues (e.g., "social media graphic" could be instagram_post)
-        3. If unclear, default to "logo" as the most common request
-        4. Consider platform-specific keywords (LinkedIn, Facebook, etc.)
-        5. Marketing terms like "flyer", "promotional" → poster
-        
-        Return JSON with the detected asset type and dimensions.
-        
-        Examples:
-        - "create Instagram story" → """ + '{"type": "instagram_story", "dimensions": "1080x1920", "confidence": "high", "reasoning": "explicitly mentioned Instagram story"}' + """
-        - "design a poster" → """ + '{"type": "poster", "dimensions": "1080x1350", "confidence": "high", "reasoning": "explicitly mentioned poster"}' + """
-        - "make a social graphic" → """ + '{"type": "instagram_post", "dimensions": "1080x1080", "confidence": "medium", "reasoning": "social graphic typically means Instagram post"}' + """
-        
-        Format: """ + '{"type": "detected_asset_type", "dimensions": "width_x_height", "confidence": "high/medium/low", "reasoning": "brief explanation of why this type was chosen"}'
+        Be conversational but expert-level professional.
+        """
         
         try:
             response = openai_client.chat.completions.create(
                 model="gpt-4",
                 messages=[
-                    {"role": "system", "content": "You are an expert at detecting visual asset types from user requests. Always return valid JSON with the exact format specified."},
+                    {"role": "system", "content": "You are an expert brand consultant providing professional advice. Be specific, helpful, and authoritative."},
+                    {"role": "user", "content": consultancy_prompt}
+                ],
+                temperature=0.7,
+                max_tokens=800
+            )
+            
+            consultancy_response = response.choices[0].message.content.strip()
+            print(f"[DEBUG] Provided consultancy advice for: {user_input}")
+            
+            return consultancy_response
+            
+        except Exception as e:
+            print(f"[DEBUG] Consultancy error: {e}")
+            return "I'd be happy to help with brand consultancy! Could you provide more details about what specific aspect of branding you'd like advice on?"
+        
+
+
+    def detect_asset_type_and_specs(self, user_input: str) -> dict:
+        """Use GPT to intelligently detect asset type and specifications"""
+        
+        detection_prompt = f"""
+        Analyze this user input and determine what they want.
+        
+        User input: "{user_input}"
+        
+        DETERMINE IF THIS IS:
+        1. ASSET GENERATION REQUEST - User wants a specific visual asset created
+        2. CONSULTANCY REQUEST - User wants advice/recommendations (no asset creation)
+        
+        CONSULTANCY INDICATORS:
+        - "Pick colors for..."
+        - "What colors work for..."  
+        - "Recommend fonts for..."
+        - "Best practices for..."
+        - "Colors for [industry] company" (no specific brand name)
+        
+        ASSET GENERATION INDICATORS:
+        - "Create logo for [Brand Name]"
+        - "Generate Instagram post"  
+        - "Design business card for [Company]"
+        - Specific brand name mentioned
+        
+        Available asset types and dimensions:
+        - logo: 1024x1024 (specific brand logos)
+        - instagram_post: 1080x1080 (brand social posts)
+        - linkedin_cover: 1584x396 (brand profile covers)
+        - poster: 1080x1350 (brand marketing materials)
+        - consultancy: N/A (advice/recommendations only)
+        
+        Return JSON with detected type:
+        Format: """ + '{"type": "consultancy/logo/instagram_post/etc", "dimensions": "width_x_height or N/A", "confidence": "high/medium/low", "reasoning": "brief explanation"}'
+        
+        try:
+            response = openai_client.chat.completions.create(
+                model="gpt-4",
+                messages=[
+                    {"role": "system", "content": "Distinguish between asset generation requests and consultancy requests. Always return valid JSON."},
                     {"role": "user", "content": detection_prompt}
                 ],
-                temperature=0.1,  # Low temperature for consistent detection
+                temperature=0.1,
                 max_tokens=200
             )
             
@@ -820,8 +914,8 @@ Always prioritize using the tool over giving generic advice."""
             detection_result = json.loads(detection_text)
             
             # Validate the result
-            asset_type = detection_result.get("type", "logo")
-            dimensions = detection_result.get("dimensions", "1024x1024")
+            asset_type = detection_result.get("type", "consultancy")
+            dimensions = detection_result.get("dimensions", "N/A")
             confidence = detection_result.get("confidence", "medium")
             reasoning = detection_result.get("reasoning", "default detection")
             
@@ -838,47 +932,31 @@ Always prioritize using the tool over giving generic advice."""
         except Exception as e:
             print(f"[DEBUG] Asset type detection error: {e}")
             
-            # Fallback to simple keyword detection
+            # Fallback: check for consultancy keywords
+            consultancy_keywords = [
+                "pick colors", "choose colors", "recommend colors", 
+                "what colors", "best colors", "colors for",
+                "pick fonts", "recommend fonts", "best fonts",
+                "brand advice", "branding tips"
+            ]
+            
             user_lower = user_input.lower()
+            if any(keyword in user_lower for keyword in consultancy_keywords):
+                return {
+                    "type": "consultancy",
+                    "dimensions": "N/A",
+                    "confidence": "high",
+                    "reasoning": "consultancy keywords detected"
+                }
             
-            # Define asset mappings as a simple fallback
-            asset_keywords = {
-                "poster": ["poster", "flyer", "promotional"],
-                "instagram_post": ["instagram post", "ig post", "insta post"],
-                "instagram_story": ["instagram story", "ig story", "insta story"], 
-                "linkedin_cover": ["linkedin cover", "linkedin banner"],
-                "youtube_thumbnail": ["youtube thumbnail", "yt thumbnail"],
-                "business_card": ["business card", "visiting card"],
-                "logo": ["logo", "brand mark", "symbol"]  # Default
-            }
-            
-            # Simple keyword matching as fallback
-            for asset_type, keywords in asset_keywords.items():
-                if any(keyword in user_lower for keyword in keywords):
-                    dimensions_map = {
-                        "logo": "1024x1024",
-                        "poster": "1080x1350", 
-                        "instagram_post": "1080x1080",
-                        "instagram_story": "1080x1920",
-                        "linkedin_cover": "1584x396",
-                        "youtube_thumbnail": "1280x720",
-                        "business_card": "1050x600"
-                    }
-                    
-                    return {
-                        "type": asset_type,
-                        "dimensions": dimensions_map.get(asset_type, "1024x1024"),
-                        "confidence": "low",
-                        "reasoning": "fallback keyword detection"
-                    }
-            
-            # Ultimate fallback
+            # Default fallback
             return {
-                "type": "logo", 
-                "dimensions": "1024x1024",
+                "type": "consultancy", 
+                "dimensions": "N/A",
                 "confidence": "low",
-                "reasoning": "default fallback"
+                "reasoning": "default consultancy fallback"
             }
+
 
     def generate_brand_asset_dalle(self, info: dict, asset_type: str, dimensions: str, user_context: str = ""):
         """Generate various brand assets with DALL-E using dynamic prompts that incorporate user context"""
@@ -1204,6 +1282,7 @@ Always prioritize using the tool over giving generic advice."""
                 sender='user',
                 text=query
             )
+            print("Message saved")
 
         # Store user query in Pinecone
         store_in_pinecone("brand-designer", "user", query)
