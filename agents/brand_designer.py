@@ -461,6 +461,7 @@ Always prioritize using the tool over giving generic advice."""
             return provided_info
 
 
+    
     def extract_from_current_input(self, user_input: str):
         """Extract brand info from current input with better brand switching detection"""
         
@@ -472,56 +473,51 @@ Always prioritize using the tool over giving generic advice."""
                     current_info_text += f"- {key}: {value}\n"
             current_info_text += "\n"
         
-        # FIXED: No f-string with JSON braces - use regular string concatenation
+        # SIMPLIFIED extraction prompt that FORCES JSON output
         extraction_prompt = f"""
-        {current_info_text}User just said: "{user_input}"
+        {current_info_text}User input: "{user_input}"
         
-        CRITICAL: If user mentions "other brand", "another brand", "different brand", they want to start fresh with a NEW brand.
+        Extract information and return ONLY valid JSON, no explanations:
         
-        Analyze this input and extract:
-        1. Asset type (poster, logo, linkedin_cover, instagram_post, etc.)
-        2. Brand information (name, style, colors, audience)
-        3. Whether this is for a new/different brand
+        Asset type mapping:
+        - "instagram poster/post" → "instagram_post"
+        - "linkedin poster/cover" → "linkedin_cover"
+        - "facebook poster/cover" → "facebook_cover"
+        - "generate asset" → "logo" (default)
         
-        IMPORTANT ASSET TYPE MAPPING:
-        - "instagram poster" OR "instagram post" → "instagram_post"
-        - "linkedin poster" OR "linkedin cover" OR "linkedin banner" → "linkedin_cover"
-        - "facebook poster" OR "facebook cover" → "facebook_cover"
-        - Generic "poster" without platform → "poster"
-        
-        Return ONLY valid JSON with no markdown.
-        Examples:
-        - "generate instagram poster" → """ + '{"asset_type": "instagram_post", "brand_name": null, "is_new_brand": false}' + """
-        - "create instagram post" → """ + '{"asset_type": "instagram_post", "brand_name": null, "is_new_brand": false}' + """
-        - "generate poster for linkedin" → """ + '{"asset_type": "linkedin_cover", "brand_name": null, "is_new_brand": false}' + """
-        - "create linkedin cover" → """ + '{"asset_type": "linkedin_cover", "brand_name": null, "is_new_brand": false}' + """
-        - "generate poster for my other brand" → """ + '{"asset_type": "poster", "brand_name": null, "is_new_brand": true}' + """
-        
-        Return format: """ + '{"brand_name": "exact name or null", "logo_type": "extracted style or null", "target_audience": "extracted audience or null", "color_palette": "extracted colors or null", "asset_type": "instagram_post/linkedin_cover/poster/logo/etc or null", "is_new_brand": true/false, "brand_personality": "extracted personality or null", "industry": "extracted industry or null"}'
+        CRITICAL: Return ONLY the JSON object, no other text.
+        """
         
         try:
             response = openai_client.chat.completions.create(
                 model="gpt-4",
                 messages=[
-                    {"role": "system", "content": "Extract asset type and brand info. Map 'instagram poster' to 'instagram_post' and 'linkedin poster' to 'linkedin_cover'. Return ONLY valid JSON with no markdown."},
+                    {"role": "system", "content": "CRITICAL: Return ONLY valid JSON with no explanations, no text before or after. Just the JSON object."},
                     {"role": "user", "content": extraction_prompt}
                 ],
                 temperature=0.1,
-                max_tokens=200
+                max_tokens=150  # Shorter to force concise responses
             )
             
             extracted_text = response.choices[0].message.content.strip()
             print(f"[DEBUG] Current input extraction: {extracted_text}")
             
-            # Clean up markdown formatting
-            if extracted_text.startswith('```json'):
-                extracted_text = extracted_text.replace('```json', '').replace('```', '').strip()
-            elif extracted_text.startswith('```'):
-                extracted_text = extracted_text.replace('```', '').strip()
+            # More aggressive cleanup
+            if "```json" in extracted_text:
+                extracted_text = extracted_text.split("```json")[1].split("```")[0].strip()
+            elif "```" in extracted_text:
+                extracted_text = extracted_text.split("```")[1].split("```")[0].strip()
+            
+            # Find JSON object in response
+            import re
+            json_match = re.search(r'\{[^}]+\}', extracted_text)
+            if json_match:
+                extracted_text = json_match.group(0)
             
             import json
             extracted_info = json.loads(extracted_text)
             
+            # Rest of the logic stays the same...
             # If it's a new brand, reset design_info
             if extracted_info.get("is_new_brand"):
                 print("[DEBUG] New brand detected from current input, resetting design_info")
@@ -552,6 +548,26 @@ Always prioritize using the tool over giving generic advice."""
             print(f"[DEBUG] Current input extraction error: {e}")
             if 'extracted_text' in locals():
                 print(f"[DEBUG] Raw extraction text: {extracted_text}")
+            
+            # SIMPLE FALLBACK - just extract asset type from keywords
+            print("[DEBUG] Using simple keyword fallback")
+            user_lower = user_input.lower()
+            
+            if "instagram" in user_lower and ("post" in user_lower or "poster" in user_lower):
+                self.detected_asset_type = "instagram_post"
+            elif "linkedin" in user_lower and ("cover" in user_lower or "poster" in user_lower):
+                self.detected_asset_type = "linkedin_cover"
+            elif "facebook" in user_lower and ("cover" in user_lower or "poster" in user_lower):
+                self.detected_asset_type = "facebook_cover"
+            elif "logo" in user_lower:
+                self.detected_asset_type = "logo"
+            elif "poster" in user_lower:
+                self.detected_asset_type = "poster"
+            elif any(word in user_lower for word in ["generate", "create", "make"]):
+                self.detected_asset_type = "logo"  # Default
+            
+            print(f"[DEBUG] Fallback detected asset type: {self.detected_asset_type}")
+
 
     def load_brand_design(self):
         """Load brand design from User.brandDesign field"""
@@ -719,6 +735,7 @@ Always prioritize using the tool over giving generic advice."""
         
         # Get ALL conversation messages (not just recent)
         recent_messages = []
+        print(f"Getting messages from {self.user_id}. for converastion: {self.conversation_id}.")
         if self.conversation_id and self.user_id:
             messages = MongoDB.get_conversation_messages(self.conversation_id, self.user_id)
             recent_messages = messages  # Use ALL messages
@@ -771,9 +788,9 @@ Always prioritize using the tool over giving generic advice."""
         # Continue with the rest of the logic using final_asset_type instead of asset_type
         asset_type = final_asset_type
         
-        # Check if brand name is needed
+         # COMPREHENSIVE QUESTIONS APPROACH - Ask everything at once
         if not self.design_info.get("brand_name"):
-            return f"I'd love to create a {asset_type.replace('_', ' ')} for you! What's the name of your brand or business?"
+            return self.ask_comprehensive_logo_questions(asset_type)
         
         # Save updated design_info
         self.save_brand_design()
@@ -788,7 +805,7 @@ Always prioritize using the tool over giving generic advice."""
         print(f"[DEBUG] Provided info: {provided_info}")
         
         # Detect generation intent
-        wants_generation = self.detect_generation_intent(processed_input) if processed_input else False
+        wants_generation = self.detect_generation_intent(user_input) if user_input else False
         
         # Generate asset if requested and we have minimum info
         if wants_generation and provided_info.get("brand_name"):
@@ -802,7 +819,6 @@ Always prioritize using the tool over giving generic advice."""
                 self.save_brand_design()
             
             print(f"[DEBUG] Generating {asset_type} with dimensions {dimensions}...")
-            # Pass the original user input as context
             asset_result = self.generate_brand_asset_dalle(self.design_info, asset_type, dimensions, user_context=user_input)
             
             if asset_result["type"] == "asset_generated":
@@ -811,9 +827,118 @@ Always prioritize using the tool over giving generic advice."""
             else:
                 return asset_result["message"]
         
-        # Asset-specific information collection
+        # Use natural conversation collection (instead of rigid collect_asset_info)
         return self.collect_asset_info(asset_type, missing_info, provided_info)
-    
+
+
+    def ask_comprehensive_logo_questions(self, asset_type: str) -> str:
+        """Generate dynamic comprehensive questions using GPT based on asset type"""
+        
+        asset_display = asset_type.replace('_', ' ')
+        
+        # Build dynamic prompt for comprehensive questions
+        questions_prompt = f"""
+        You are a professional brand designer about to create a {asset_display} for a client.
+        You need to ask comprehensive questions to gather all necessary information in ONE message.
+        
+        Generate a friendly, comprehensive question that asks for ALL the key information needed to create a {asset_display}.
+        
+        REQUIREMENTS:
+        1. Ask for ALL essential information in one message (don't make them wait)
+        2. Use emojis and clear formatting to make it easy to read
+        3. Provide examples to help them respond
+        4. Show enthusiasm about the project
+        5. Make it feel conversational like ChatGPT would
+        6. Include a simple example response format at the end
+        
+        ESSENTIAL INFORMATION TO ASK FOR:
+        - Brand/Company name
+        - Industry/Purpose  
+        - Style preference
+        - Color preferences
+        - Target audience
+        - {asset_display}-specific requirements
+        
+        ASSET-SPECIFIC CONSIDERATIONS:
+        - For logos: Ask about logo style (text-based, icon, combination)
+        - For social media: Ask about post purpose/message
+        - For LinkedIn covers: Ask about professional title/expertise
+        - For business cards: Ask about contact information needs
+        - For marketing materials: Ask about key message/call-to-action
+        
+        Generate a natural, comprehensive question that covers all these points for a {asset_display}.
+        """
+        
+        try:
+            response = openai_client.chat.completions.create(
+                model="gpt-4",
+                messages=[
+                    {"role": "system", "content": f"Generate comprehensive, friendly questions for gathering {asset_display} design requirements. Be enthusiastic and helpful like ChatGPT."},
+                    {"role": "user", "content": questions_prompt}
+                ],
+                temperature=0.8,  # Higher temperature for more natural, varied responses
+                max_tokens=400
+            )
+            
+            dynamic_questions = response.choices[0].message.content.strip()
+            print(f"[DEBUG] Generated dynamic comprehensive questions for {asset_type}")
+            
+            return dynamic_questions
+            
+        except Exception as e:
+            print(f"[DEBUG] Dynamic questions generation error: {e}")
+            
+            # Intelligent fallback based on asset type
+            return self.generate_fallback_questions(asset_type)
+
+    def generate_fallback_questions(self, asset_type: str) -> str:
+        """Generate fallback questions when GPT fails"""
+        
+        asset_display = asset_type.replace('_', ' ')
+        
+        # Base structure for different asset types
+        fallback_templates = {
+            "logo": f"""Perfect! I'm excited to create a logo for you. To design something amazing, could you share:
+
+    🏢 **Brand Name:** What's your company/brand called?
+    🎯 **Industry:** What kind of business? (tech, restaurant, consulting, etc.)
+    🎨 **Style:** What vibe do you want? (modern, playful, professional, creative)
+    🌈 **Colors:** Any color preferences or should I surprise you?
+    👥 **Audience:** Who are your main customers?
+
+    Example: *"TechFlow, tech startup, modern minimal style, blue colors, young professionals"*""",
+
+            "instagram_post": f"""Great! I'll create an Instagram post for you. Let me know:
+
+    🏢 **Brand:** What's your brand name?
+    📱 **Purpose:** What's this post about? (announcement, product, quote, etc.)
+    🎨 **Style:** What vibe? (clean, bold, fun, professional)
+    🌈 **Colors:** Preferred colors?
+    💬 **Message:** Key text or message to include?
+
+    Example: *"Bella's Cafe, new menu launch, warm appetizing style, orange/red, 'Try Our New Summer Menu!'"*""",
+
+            "linkedin_cover": f"""Excellent! A LinkedIn cover will make your profile stand out. Please share:
+
+    🏢 **Name/Brand:** What should be prominently featured?
+    💼 **Title:** Your professional role or expertise?
+    🎯 **Message:** What should visitors know about you?
+    🎨 **Style:** Professional, creative, or industry-specific?
+    🌈 **Colors:** Professional color preferences?
+
+    Example: *"John Smith, Senior Developer, 'Building innovative web solutions,' modern professional, blue/gray"*"""
+        }
+        
+        # Return specific template or generic one
+        return fallback_templates.get(asset_type, f"""Awesome! I'll create a {asset_display} for you. To make it perfect, could you share:
+
+    🏢 **Brand Name:** What's your brand called?
+    🎯 **Purpose:** What's this {asset_display} for?
+    🎨 **Style:** What vibe do you want?
+    🌈 **Colors:** Any color preferences?
+    👥 **Audience:** Who will see this?
+
+    Feel free to share as much detail as you'd like!""")
 
 
     def provide_brand_consultancy(self, user_input: str) -> str:
@@ -1154,37 +1279,87 @@ Always prioritize using the tool over giving generic advice."""
                 "brand_info": info
             }
     
+
     def collect_asset_info(self, asset_type: str, missing_info: list, provided_info: dict) -> str:
-        """Collect information based on asset type"""
+        """Generate natural conversation responses using GPT instead of rigid templates"""
         
-        asset_display = asset_type.replace('_', ' ')
-        
-        if "brand_name" in missing_info:
-            return f"I'd love to create a {asset_display} for you! What's the name of your brand or business?"
-        
-        elif "target_audience" in missing_info:
-            return f"Great! For **{provided_info['brand_name']}**, who is your target audience for this {asset_display}? (e.g., young professionals, families, tech enthusiasts)"
-        
-        elif "color_palette" in missing_info:
-            return f"Perfect! Any color preferences for your {asset_display}? You can mention specific colors, a mood, or say 'surprise me'!"
-        
-        elif asset_type == "logo" and "logo_type" in missing_info:
-            return f"What style of logo are you thinking for **{provided_info['brand_name']}**? For example:\n\n• **Text-based** - stylized company name\n• **Icon-based** - symbol or graphic\n• **Combination** - text + icon together\n\nOr describe your preferred style!"
-        
-        else:
-            # Auto-complete and generate
+        # If we have enough info (brand_name + at least one other field), auto-complete and generate
+        if provided_info.get("brand_name") and len(provided_info) >= 2:
+            print("[DEBUG] Enough info provided, auto-completing and generating...")
+            # Auto-complete missing fields
             auto_completed = self.intelligent_auto_complete(self.design_info.copy(), asset_type)
             for key, value in auto_completed.items():
                 if not self.design_info.get(key):
                     self.design_info[key] = value
             self.save_brand_design()
             
-            asset_result = self.generate_brand_asset_dalle(self.design_info, asset_type, "1024x1024")
+            # Generate the asset
+            dimensions = self.get_dimensions_for_asset_type(asset_type)
+            asset_result = self.generate_brand_asset_dalle(self.design_info, asset_type, dimensions)
+            
             if asset_result["type"] == "asset_generated":
                 self.last_generated_image = asset_result["image_url"]
                 return f"""ASSET_GENERATED|{asset_result['image_url']}|{asset_result['message']}"""
             else:
                 return asset_result["message"]
+        
+        # Otherwise, ask for more info naturally using GPT
+        prompt = f"""
+        You are a friendly brand designer talking to a client who wants to create a {asset_type.replace('_', ' ')}.
+        
+        CURRENT SITUATION:
+        - Asset they want: {asset_type.replace('_', ' ')}
+        - Information they've provided: {provided_info}
+        - Information still needed: {missing_info}
+        
+        Generate a natural, conversational response that:
+        1. Asks for the most important missing information
+        2. Sounds friendly and professional (like ChatGPT)
+        3. Gives examples or options to help them respond
+        4. Shows enthusiasm about their project
+        
+        Keep it conversational, not robotic. Don't use phrases like "I'd love to" repeatedly.
+        Be creative and natural in your phrasing.
+        """
+        
+        try:
+            response = openai_client.chat.completions.create(
+                model="gpt-4",
+                messages=[
+                    {"role": "system", "content": "Generate natural, conversational responses like a real brand designer would. Be enthusiastic but not repetitive."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.8,  # Higher temperature for natural variation
+                max_tokens=250
+            )
+            
+            return response.choices[0].message.content.strip()
+            
+        except Exception as e:
+            print(f"[DEBUG] GPT response error: {e}")
+            # Simple fallback without rigid templates
+            if missing_info:
+                next_field = missing_info[0]
+                return f"I'm excited to work on your {asset_type.replace('_', ' ')}! Could you tell me about your {next_field.replace('_', ' ')}?"
+            else:
+                return "Let me create that for you right now!"
+
+
+    def get_dimensions_for_asset_type(self, asset_type: str) -> str:
+        """Get appropriate dimensions for asset type"""
+        
+        dimensions_map = {
+            "logo": "1024x1024",
+            "poster": "1080x1350", 
+            "instagram_post": "1080x1080",
+            "instagram_story": "1080x1920",
+            "linkedin_cover": "1584x396",
+            "facebook_cover": "1200x630",
+            "youtube_thumbnail": "1280x720",
+            "business_card": "1050x600"
+        }
+        
+        return dimensions_map.get(asset_type, "1024x1024")
 
     def intelligent_auto_complete(self, provided_info: dict, asset_type: str = "logo"):
         """Enhanced auto-completion with asset-type awareness"""
@@ -1264,6 +1439,7 @@ Always prioritize using the tool over giving generic advice."""
             return provided_info
     def load_conversation_history(self):
         """Load previous messages into memory"""
+        print(f"Getting messages of userID {self.user_id} from conversation {self.conversation_id}")
         messages = MongoDB.get_conversation_messages(self.conversation_id, self.user_id)
         for msg in messages:
             if msg['sender'] == 'user':
@@ -1271,6 +1447,7 @@ Always prioritize using the tool over giving generic advice."""
             else:
                 self.memory.chat_memory.add_ai_message(msg['text'])
 
+        print(f"[DEBUG] Loaded {len(messages)} messages from conversation history")
     def handle_query(self, query: str):
         """Handle user query using LangChain agent with tools (prioritized)"""
         
@@ -1332,6 +1509,7 @@ Always prioritize using the tool over giving generic advice."""
                         role = "User" if msg['sender'] == 'user' else "Assistant"
                         context_info += f"{role}: {msg['text']}\n"
                     context_info += "\nCurrent conversation:\n"
+                print(f"Context: {context_info}")
 
             # Enhanced query with context
             if context_info:
@@ -1368,80 +1546,6 @@ Always prioritize using the tool over giving generic advice."""
                 sender='agent',
                 text=ai_response,
                 agent=self.agent_name
-            )
-
-        # Store in Pinecone
-        store_in_pinecone("brand-designer", "assistant", ai_response)
-        
-        return ai_response
-    
-    
-
-    def handle_query_with_context(self, query: str, previous_messages: list = None, context: str = None):
-        """Handle user query with conversation context"""
-        
-        # Save user message to MongoDB
-        if self.conversation_id and self.user_id:
-            MongoDB.save_message(
-                conversation_id=self.conversation_id,
-                user_id=self.user_id,
-                sender='user',
-                text=query
-            )
-
-        # Build conversation context for better responses
-        context_info = ""
-        if context:
-            context_info = f"Context: {context}\n\n"
-        
-        if previous_messages:
-            context_info += "Previous conversation:\n"
-            for msg in previous_messages[-5:]:  # Use last 5 messages for context
-                role = msg.get("role", "user")
-                content = msg.get("content", "")
-                context_info += f"{role.title()}: {content}\n"
-            context_info += "\n"
-
-        # Enhanced query with context
-        enhanced_query = f"{context_info}Current message: {query}"
-
-        # Store user query in Pinecone
-        store_in_pinecone("brand-designer", "user", query)
-
-        # Retrieve similar past queries for additional context
-        past_results = retrieve_from_pinecone(query)
-        if past_results.matches:
-            print(f"[DEBUG] Similar past entries found: {past_results.matches}")
-
-        # Use OpenAI directly for better context handling
-        try:
-            messages = [
-                {"role": "system", "content": self.system_prompt},
-                {"role": "user", "content": enhanced_query}
-            ]
-            
-            response = openai_client.chat.completions.create(
-                model="gpt-4",
-                messages=messages,
-                temperature=0.7,
-                max_tokens=1000
-            )
-            
-            ai_response = response.choices[0].message.content
-            
-        except Exception as e:
-            print(f"OpenAI API error: {e}")
-            # Fallback to existing method
-            ai_response = "I'm sorry, I'm having trouble processing your request right now. Could you please try again?"
-
-
-        # Save agent response to MongoDB
-        if self.conversation_id and self.user_id:
-            MongoDB.save_message(
-                conversation_id=self.conversation_id,
-                user_id=self.user_id,
-                sender='agent',
-                text=ai_response
             )
 
         # Store in Pinecone

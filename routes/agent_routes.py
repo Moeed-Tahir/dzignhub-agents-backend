@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Query, HTTPException
+from fastapi import APIRouter, Query, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional
 from agents.brand_designer import get_brand_designer_agent
@@ -45,6 +45,27 @@ def create_conversation(request: NewConversationRequest):
     except Exception as e:
         return {"success": False, "error": str(e)}
 
+
+@router.get("/conversations/single-agent/{agent}/{userId}")
+def get_user_conversations_by_agent(
+    agent: str, 
+    userId: str
+):
+    """Get all conversations for a user filtered by agent (JWT protected)"""
+    try:
+        # Now using the agent parameter correctly
+        conversations = MongoDB.get_user_conversations_by_agent(userId, agent)
+        return {
+            "success": True, 
+            "conversations": conversations,
+            "count": len(conversations),
+            "user_id": userId,  # Include for debugging
+            "agent": agent
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 @router.get("/conversations/{user_id}")
 def get_user_conversations(user_id: str):
     """Get all conversations for a user"""
@@ -57,6 +78,7 @@ def get_user_conversations(user_id: str):
         }
     except Exception as e:
         return {"success": False, "error": str(e)}
+
 
 @router.put("/conversations/{conversation_id}")
 def update_conversation_title(conversation_id: str, request: UpdateConversationRequest):

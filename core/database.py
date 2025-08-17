@@ -77,6 +77,18 @@ class MongoDB:
             conv["userId"] = str(conv["userId"])
             
         return conversations
+    
+    @staticmethod
+    def get_user_conversations_by_agent(user_id: str, agent: str):
+        """Get all conversations for a user filtered by agent"""
+        conversations = list(conversations_collection.find({"userId": ObjectId(user_id), "agent": agent}).sort("updatedAt", -1))
+        
+        # Convert ObjectId to string
+        for conv in conversations:
+            conv["_id"] = str(conv["_id"])
+            conv["userId"] = str(conv["userId"])
+            
+        return conversations
 
     @staticmethod
     def get_user_recent_messages(user_id: str, limit: int = 50):
