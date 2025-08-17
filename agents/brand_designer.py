@@ -39,17 +39,117 @@ def embed_text(text: str):
         input=text
     ).data[0].embedding
 
-def store_in_pinecone(agent_type: str, role: str, text: str):
-    """Store only embedding in Pinecone (no raw text)."""
-    vector = embed_text(text)
-    vector_id = f"{agent_type}-{role}-{hash(text)}"
-    pinecone_index.upsert([(vector_id, vector)])
+def store_in_pinecone(agent_type: str, role: str, text: str, user_id: str, conversation_id: str = None):
+    """Store embedding with minimal metadata in Pinecone"""
+    try:
+        # Create embedding
+        vector = embed_text(text)
+        
+        # Create minimal metadata
+        metadata = {
+            "agent_type": agent_type,
+            "role": role,
+            "conversation_id": conversation_id,
+            "user_id": user_id
+        }
+        
+        # Remove None values
+        metadata = {k: v for k, v in metadata.items() if v is not None}
+        
+        # Create unique vector ID
+        vector_id = f"{agent_type}-{role}-{hash(text)}-{datetime.utcnow().timestamp()}"
+        
+        # Store in Pinecone with minimal metadata
+        pinecone_index.upsert([(vector_id, vector, metadata)])
+        
+        print(f"[DEBUG] Stored in Pinecone: {vector_id} with metadata: {metadata}")
+        return vector_id
+        
+    except Exception as e:
+        print(f"[DEBUG] Pinecone storage error: {e}")
+        return None
 
 def retrieve_from_pinecone(query: str, top_k: int = 3):
     """Retrieve most relevant embeddings for a query."""
     query_vector = embed_text(query)
     results = pinecone_index.query(vector=query_vector, top_k=top_k, include_values=False)
     return results
+
+
+
+def search_conversations_by_query(query: str, user_id: str, agent_type: str = "brand-designer", top_k: int = 10):
+    """Search conversations - get conversation_ids from Pinecone, conversation details from MongoDB"""
+    try:
+        print(f"[DEBUG] Searching conversations for: '{query}' (user: {user_id})")
+        
+        # Create embedding for search query
+        query_vector = embed_text(query)
+        
+        # Search Pinecone - only get conversation_ids
+        search_results = pinecone_index.query(
+            vector=query_vector,
+            top_k=top_k * 3,  # Get more results to find unique conversations
+            include_metadata=True,
+            include_values=False,
+            filter={
+                "agent_type": agent_type,
+                "user_id": user_id
+            }
+        )
+        
+        print(f"[DEBUG] Found {len(search_results.matches)} vector matches")
+        
+        # Extract unique conversation_ids and keep best scores
+        conversation_scores = {}  # conversation_id -> best_score
+        
+        for match in search_results.matches:
+            if match.score < 0.2:  # Similarity threshold
+                continue
+                
+            metadata = match.metadata or {}
+            conv_id = metadata.get('conversation_id')
+            
+            if not conv_id:
+                continue
+            
+            # Keep the best score for each conversation
+            if conv_id not in conversation_scores or match.score > conversation_scores[conv_id]:
+                conversation_scores[conv_id] = match.score
+        
+        print(f"[DEBUG] Found {len(conversation_scores)} unique conversations")
+        
+        # Get FULL conversation details from MongoDB
+        search_results = []
+        for conv_id, score in sorted(conversation_scores.items(), key=lambda x: x[1], reverse=True)[:top_k]:
+            try:
+                # Get conversation from MongoDB
+                conversation = MongoDB.get_conversation_by_id(conv_id)
+                if not conversation:
+                    print(f"[DEBUG] Conversation {conv_id} not found in MongoDB")
+                    continue
+                
+                # Verify ownership
+                if conversation.get('userId') != user_id:  # Note: check field name
+                    print(f"[DEBUG] Conversation {conv_id} belongs to different user")
+                    continue
+                
+                # Add search score to conversation
+                conversation['similarity_score'] = score
+                search_results.append(conversation)
+                
+                print(f"[DEBUG] Added conversation: {conversation.get('title', 'Untitled')} (score: {score:.3f})")
+                
+            except Exception as e:
+                print(f"[DEBUG] Error processing conversation {conv_id}: {e}")
+                continue
+        
+        print(f"[DEBUG] Returning {len(search_results)} conversation results")
+        return search_results
+        
+    except Exception as e:
+        print(f"[DEBUG] Search error: {e}")
+        return []
+
 
 def generate_logo_dalle(info: dict):
     """Generate logo with DALL-E and return proper format for frontend"""
@@ -1448,6 +1548,8 @@ Always prioritize using the tool over giving generic advice."""
                 self.memory.chat_memory.add_ai_message(msg['text'])
 
         print(f"[DEBUG] Loaded {len(messages)} messages from conversation history")
+
+
     def handle_query(self, query: str):
         """Handle user query using LangChain agent with tools (prioritized)"""
         
@@ -1462,7 +1564,13 @@ Always prioritize using the tool over giving generic advice."""
             print("Message saved")
 
         # Store user query in Pinecone
-        store_in_pinecone("brand-designer", "user", query)
+        store_in_pinecone(
+        agent_type="brand-designer", 
+        role="user", 
+        text=query,
+        user_id=self.user_id,
+        conversation_id=self.conversation_id  # Add conversation_id
+        )
 
         # Retrieve similar past queries
         past_results = retrieve_from_pinecone(query)
@@ -1549,7 +1657,13 @@ Always prioritize using the tool over giving generic advice."""
             )
 
         # Store in Pinecone
-        store_in_pinecone("brand-designer", "assistant", ai_response)
+        store_in_pinecone(
+        agent_type="brand-designer", 
+        role="agent", 
+        text=ai_response,
+        user_id=self.user_id,
+        conversation_id=self.conversation_id
+        )
         
         return ai_response
 

@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from typing import Optional
 from agents.brand_designer import get_brand_designer_agent
 from core.database import MongoDB
+from agents.brand_designer import search_conversations_by_query
 
 router = APIRouter()
 
@@ -45,6 +46,32 @@ def create_conversation(request: NewConversationRequest):
     except Exception as e:
         return {"success": False, "error": str(e)}
 
+@router.get("/conversations/search")
+def search_conversations(
+    query: str = Query(..., description="Search query"),
+    user_id: str = Query(..., description="User ID"),
+    agent: str = Query("brand-designer", description="Agent type"),
+    limit: int = Query(10, description="Number of results to return")
+):
+    """Search conversations using vector similarity"""
+    try:
+        # Search for similar conversations
+        search_results = search_conversations_by_query(
+            query=query,
+            user_id=user_id,
+            agent_type=agent,
+            top_k=limit
+        )
+        
+        return {
+            "success": True,
+            "results": search_results,
+            "count": len(search_results),
+            "query": query
+        }
+    except Exception as e:
+        print(f"[DEBUG] Search route error: {e}")
+        return {"success": False, "error": str(e)}
 
 @router.get("/conversations/single-agent/{agent}/{userId}")
 def get_user_conversations_by_agent(

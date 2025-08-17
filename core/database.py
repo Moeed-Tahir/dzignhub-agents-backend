@@ -2,7 +2,6 @@ from pymongo import MongoClient
 from datetime import datetime
 from bson import ObjectId
 from core.config import MONGODB_URL, DATABASE_NAME
-
 # MongoDB connection
 client = MongoClient(MONGODB_URL)
 db = client[DATABASE_NAME]
@@ -65,6 +64,28 @@ class MongoDB:
             message["userId"] = str(message["userId"])
             
         return messages
+    
+    @staticmethod
+    def get_conversation_by_id(conversation_id: str):
+        """Get a specific conversation by ID"""
+        try:
+            # Convert string to ObjectId if needed
+            if isinstance(conversation_id, str):
+                conversation_id = ObjectId(conversation_id)
+            
+            conversation = conversations_collection.find_one({"_id": conversation_id})
+            
+            if conversation:
+                conversation["_id"] = str(conversation["_id"])
+                conversation["userId"] = str(conversation["userId"])  # Convert ObjectId to string
+                return conversation
+            return None
+            
+        except Exception as e:
+            print(f"Error getting conversation by ID: {e}")
+            return None
+
+
 
     @staticmethod
     def get_user_conversations(user_id: str):
