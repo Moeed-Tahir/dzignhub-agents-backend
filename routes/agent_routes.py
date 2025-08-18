@@ -173,12 +173,16 @@ def brand_designer_endpoint(request: ChatRequest):
     try:
         # Create conversation if not provided
         conversation_id = request.conversation_id
+        is_new_conversation = False
+        
         if not conversation_id:
             conversation_id = MongoDB.create_conversation(
                 user_id=request.user_id,
                 agent="brand-designer",
                 title="Brand Design Chat"
             )
+            is_new_conversation = True
+            
 
         # Get agent and handle query (context is automatically handled inside)
         agent = get_brand_designer_agent(
@@ -193,6 +197,7 @@ def brand_designer_endpoint(request: ChatRequest):
             "success": True,
             "response": response,
             "conversation_id": conversation_id,
+            "is_new_conversation": is_new_conversation,
             "agent": "brand-designer"
         }
     except Exception as e:
