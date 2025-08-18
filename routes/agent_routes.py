@@ -4,6 +4,8 @@ from typing import Optional
 from agents.brand_designer import get_brand_designer_agent
 from core.database import MongoDB
 from agents.brand_designer import search_conversations_by_query
+from openai import OpenAI
+import os
 
 router = APIRouter()
 
@@ -166,7 +168,113 @@ def get_user_messages(user_id: str, limit: int = Query(50, description="Number o
     except Exception as e:
         return {"success": False, "error": str(e)}
 
-# Agent Chat Routes
+
+# Function to generate conversation title based on prompt | conditional
+def generate_conversation_title(prompt: str) -> str:
+    """Generate a conversation title based on the user's first message"""
+    try:
+        # Clean and truncate the prompt
+        prompt_clean = prompt.strip().lower()
+        
+        # Define keywords and their corresponding titles
+        title_patterns = {
+            # Logo-related
+            "logo": "Logo Design",
+            "brand logo": "Brand Logo Design", 
+            "company logo": "Company Logo Design",
+            "logo design": "Logo Design Project",
+            
+            # Social media
+            "instagram": "Instagram Design",
+            "linkedin": "LinkedIn Design", 
+            "facebook": "Facebook Design",
+            "social media": "Social Media Design",
+            "post design": "Social Media Post",
+            
+            # Brand identity
+            "brand": "Brand Identity",
+            "branding": "Brand Strategy",
+            "brand identity": "Brand Identity Design",
+            "visual identity": "Visual Identity",
+            
+            # Colors
+            "color": "Brand Colors", 
+            "color scheme": "Color Scheme Design",
+            "palette": "Color Palette",
+            
+            # Business cards & print
+            "business card": "Business Card Design",
+            "card design": "Business Card",
+            "flyer": "Flyer Design",
+            "brochure": "Brochure Design",
+            
+            # Web design
+            "website": "Website Design",
+            "web design": "Web Design Project",
+            "landing page": "Landing Page Design",
+            
+            # Specific design types
+            "poster": "Poster Design",
+            "banner": "Banner Design", 
+            "cover": "Cover Design",
+            "header": "Header Design"
+        }
+        
+        # Check for specific patterns (most specific first)
+        for keyword, title in title_patterns.items():
+            if keyword in prompt_clean:
+                return title
+        
+        # If no specific pattern found, create title from first few words
+        words = prompt.split()
+        if len(words) <= 3:
+            return prompt.title()
+        else:
+            # Take first 3-4 words and add "Design"
+            title_words = words[:3]
+            title = " ".join(title_words).title()
+            
+            # Add "Design" if not already present
+            if "design" not in title.lower():
+                title += " Design"
+                
+            return title
+            
+    except Exception as e:
+        print(f"[DEBUG] Title generation error: {e}")
+        return "Brand Design Chat"
+    
+# Function to generate AI-powered title using OpenAI (fallback to keyword-based)
+def generate_dynamic_title(prompt: str) -> str:
+    """Generate title using OpenAI (fallback to keyword-based)"""
+    try:
+        openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        
+        response = openai_client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "Generate a short, descriptive title (3-5 words) for a conversation based on the user's request. Focus on the main  task."},
+                {"role": "user", "content": f"User request: {prompt}"}
+            ],
+            max_tokens=20,
+            temperature=0.3
+        )
+        
+        ai_title = response.choices[0].message.content.strip()
+        
+        # Clean up the title (remove quotes, etc.)
+        ai_title = ai_title.replace('"', '').replace("'", '')
+        
+        # Validate length
+        if len(ai_title) > 50:
+            raise Exception("Title too long")
+            
+        return ai_title
+        
+    except Exception as e:
+        print(f"[DEBUG] AI title generation failed: {e}, using keyword-based")
+        return generate_conversation_title(prompt)  # Fallback to keyword-based
+
 @router.post("/brand-designer")
 def brand_designer_endpoint(request: ChatRequest):
     """Brand designer endpoint with automatic context handling"""
@@ -176,10 +284,13 @@ def brand_designer_endpoint(request: ChatRequest):
         is_new_conversation = False
         
         if not conversation_id:
+            # Use AI-powered title generation with keyword fallback
+            dynamic_title = generate_dynamic_title(request.prompt)
+            
             conversation_id = MongoDB.create_conversation(
                 user_id=request.user_id,
-                agent="brand-designer",
-                title="Brand Design Chat"
+                agent="brand-designer", 
+                title=dynamic_title
             )
             is_new_conversation = True
             
