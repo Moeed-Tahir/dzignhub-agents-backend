@@ -213,6 +213,7 @@ class MongoDB:
         
 
 
+    # Content Preferences Routes
     @staticmethod
     def get_user_content_preferences(user_id: str):
         """Get user's content preferences"""
@@ -237,4 +238,31 @@ class MongoDB:
             return result.modified_count > 0 or result.upserted_id is not None
         except Exception as e:
             print(f"[DEBUG] Error updating content preferences: {e}")
+            return False
+
+    # SEO Routes
+    @staticmethod
+    def get_user_seo_preferences(user_id: str):
+        """Get user's SEO preferences"""
+        try:
+            user = users_collection.find_one({"_id": ObjectId(user_id)})
+            if user and "seoPreferences" in user:
+                return user["seoPreferences"]
+            return {}
+        except Exception as e:
+            print(f"[DEBUG] Error getting SEO preferences: {e}")
+            return {}
+
+    @staticmethod
+    def update_user_seo_preferences(user_id: str, seo_prefs: dict):
+        """Update user's SEO preferences"""
+        try:
+            result = users_collection.update_one(
+                {"_id": ObjectId(user_id)},
+                {"$set": {"seoPreferences": seo_prefs}},
+                upsert=True
+            )
+            return result.modified_count > 0 or result.upserted_id is not None
+        except Exception as e:
+            print(f"[DEBUG] Error updating SEO preferences: {e}")
             return False

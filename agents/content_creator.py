@@ -595,7 +595,7 @@ Always prioritize using the tool over giving generic advice."""
             
             if content_result["type"] == "content_generated":
                 self.last_generated_content = content_result["content"]
-                return f"""CONTENT_GENERATED|{content_result['content']}|{content_result['message']}"""
+                return f"""{content_result['content']}\n{content_result['message']}"""
             else:
                 return content_result["message"]
         
@@ -827,7 +827,7 @@ Just describe what you want to write about, and I'll help you create engaging co
             
             if content_result["type"] == "content_generated":
                 self.last_generated_content = content_result["content"]
-                return f"""CONTENT_GENERATED|{content_result['content']}|{content_result['message']}"""
+                return f"""{content_result['content']}\n{content_result['message']}"""
             else:
                 return content_result["message"]
         
@@ -927,7 +927,7 @@ What do you want to achieve? ✨"""
                 # Reconstruct the proper format
                 if self.last_generated_content in ai_response:
                     success_message = "I've created engaging content that perfectly matches your requirements."
-                    ai_response = f"CONTENT_GENERATED|{self.last_generated_content}|{success_message}"
+                    ai_response = f"{self.last_generated_content}\n{success_message}"
                     print(f"[DEBUG] Reconstructed proper format: {ai_response}")
             
         except Exception as e:
