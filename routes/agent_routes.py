@@ -4,6 +4,8 @@ from typing import Optional
 from agents.brand_designer import get_brand_designer_agent
 from core.database import MongoDB
 from agents.brand_designer import search_conversations_by_query
+from agents.content_creator import get_content_creator_agent, search_content_conversations
+
 from openai import OpenAI
 import os
 
@@ -353,3 +355,108 @@ def brand_designer_status():
         "agent": "brand-designer",
         "version": "1.0.0"
     }
+
+
+@router.post("/content-creator")
+def content_creator_endpoint(request: ChatRequest):
+    """Content creator endpoint with automatic context handling"""
+    try:
+        # Create conversation if not provided
+        conversation_id = request.conversation_id
+        is_new_conversation = False
+        
+        if not conversation_id:
+            # Use AI-powered title generation with keyword fallback
+            dynamic_title = generate_dynamic_content_title(request.prompt)
+            
+            conversation_id = MongoDB.create_conversation(
+                user_id=request.user_id,
+                agent="content-creator", 
+                title=dynamic_title
+            )
+            is_new_conversation = True
+
+        # Get agent and handle query
+        agent = get_content_creator_agent(
+            user_id=request.user_id,
+            conversation_id=conversation_id
+        )
+        
+        response = agent.handle_query(request.prompt)
+        
+        return {
+            "success": True,
+            "response": response,
+            "conversation_id": conversation_id,
+            "is_new_conversation": is_new_conversation,
+            "agent": "content-creator"
+        }
+    except Exception as e:
+        print(f"Error in content creator endpoint: {e}")
+        return {"success": False, "error": str(e)}
+
+@router.get("/content-creator")
+def content_creator_status():
+    """Get content creator agent status"""
+    return {
+        "success": True,
+        "message": "Content Creator Agent is running!",
+        "agent": "content-creator",
+        "version": "1.0.0"
+    }
+
+# content-specific search endpoint
+@router.get("/content/search")
+def search_content_conversations(
+    query: str = Query(..., description="Search query"),
+    user_id: str = Query(..., description="User ID"),
+    limit: int = Query(10, description="Number of results to return")
+):
+    """Search content conversations using vector similarity"""
+    try:
+        search_results = search_content_conversations(
+            query=query,
+            user_id=user_id,
+            agent_type="content-creator",
+            top_k=limit
+        )
+        
+        return {
+            "success": True,
+            "results": search_results,
+            "count": len(search_results),
+            "query": query
+        }
+    except Exception as e:
+        print(f"[DEBUG] Content search route error: {e}")
+        return {"success": False, "error": str(e)}
+
+# Add title generation helper
+def generate_dynamic_content_title(prompt: str) -> str:
+    """Generate title for content creation conversations"""
+    try:
+        prompt_clean = prompt.strip().lower()
+        
+        title_patterns = {
+            "instagram": "Instagram Content",
+            "linkedin": "LinkedIn Content", 
+            "facebook": "Facebook Content",
+            "blog": "Blog Writing",
+            "newsletter": "Newsletter Content",
+            "script": "Script Writing",
+            "twitter": "Twitter Content",
+            "email": "Email Content",
+            "post": "Social Media Post",
+            "content": "Content Creation",
+            "write": "Content Writing"
+        }
+        
+        for keyword, title in title_patterns.items():
+            if keyword in prompt_clean:
+                return title
+        
+        return "Content Creation"
+        
+    except Exception as e:
+        print(f"[DEBUG] Content title generation error: {e}")
+        return "Content Chat"

@@ -210,3 +210,31 @@ class MongoDB:
         except Exception as e:
             print(f"[DEBUG] Error updating brand design: {e}")
             return False
+        
+
+
+    @staticmethod
+    def get_user_content_preferences(user_id: str):
+        """Get user's content preferences"""
+        try:
+            user = users_collection.find_one({"_id": ObjectId(user_id)})
+            if user and "contentPreferences" in user:
+                return user["contentPreferences"]
+            return {}
+        except Exception as e:
+            print(f"[DEBUG] Error getting content preferences: {e}")
+            return {}
+
+    @staticmethod
+    def update_user_content_preferences(user_id: str, content_prefs: dict):
+        """Update user's content preferences"""
+        try:
+            result = users_collection.update_one(
+                {"_id": ObjectId(user_id)},
+                {"$set": {"contentPreferences": content_prefs}},
+                upsert=True
+            )
+            return result.modified_count > 0 or result.upserted_id is not None
+        except Exception as e:
+            print(f"[DEBUG] Error updating content preferences: {e}")
+            return False
