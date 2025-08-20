@@ -266,3 +266,35 @@ class MongoDB:
         except Exception as e:
             print(f"[DEBUG] Error updating SEO preferences: {e}")
             return False
+
+
+
+
+
+
+    # Strategy Preferences Routes
+    @staticmethod
+    def get_user_strategy_preferences(user_id: str):
+        """Get user's strategy preferences"""
+        try:
+            user = users_collection.find_one({"_id": ObjectId(user_id)})
+            if user and "strategyPreferences" in user:
+                return user["strategyPreferences"]
+            return {}
+        except Exception as e:
+            print(f"[DEBUG] Error getting strategy preferences: {e}")
+            return {}
+
+    @staticmethod
+    def update_user_strategy_preferences(user_id: str, strategy_prefs: dict):
+        """Update user's strategy preferences"""
+        try:
+            result = users_collection.update_one(
+                {"_id": ObjectId(user_id)},
+                {"$set": {"strategyPreferences": strategy_prefs}},
+                upsert=True
+            )
+            return result.modified_count > 0 or result.upserted_id is not None
+        except Exception as e:
+            print(f"[DEBUG] Error updating strategy preferences: {e}")
+            return False
