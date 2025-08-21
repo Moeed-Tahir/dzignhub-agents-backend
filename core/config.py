@@ -11,5 +11,5 @@ PINECONE_ENV = os.getenv("PINECONE_ENV")
 
 
 # MongoDB Configuration
-MONGODB_URL = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
+MONGODB_URL = os.getenv("MONGODB_URL", "mongodb+srv://abdullahk10204:fB3RFeBuhMtz5RXj@cluster0.i7klkt2.mongodb.net/")
 DATABASE_NAME = os.getenv("DATABASE_NAME", "allmyai")
