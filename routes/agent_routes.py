@@ -4,6 +4,9 @@ from typing import Optional
 from agents.brand_designer import get_brand_designer_agent
 from core.database import MongoDB
 from agents.brand_designer import search_conversations_by_query
+from agents.content_creator import get_content_creator_agent, search_content_conversations
+from agents.seo_specialist import get_seo_specialist_agent, search_seo_conversations
+from agents.mira_strategist import get_mira_strategist_agent, search_strategy_conversations
 from openai import OpenAI
 import os
 
@@ -353,3 +356,621 @@ def brand_designer_status():
         "agent": "brand-designer",
         "version": "1.0.0"
     }
+
+
+@router.post("/content-creator")
+def content_creator_endpoint(request: ChatRequest):
+    """Content creator endpoint with automatic context handling"""
+    try:
+        # Create conversation if not provided
+        conversation_id = request.conversation_id
+        is_new_conversation = False
+        
+        if not conversation_id:
+            # Use AI-powered title generation with keyword fallback
+            dynamic_title = generate_dynamic_content_title(request.prompt)
+            
+            conversation_id = MongoDB.create_conversation(
+                user_id=request.user_id,
+                agent="content-creator", 
+                title=dynamic_title
+            )
+            is_new_conversation = True
+
+        # Get agent and handle query
+        agent = get_content_creator_agent(
+            user_id=request.user_id,
+            conversation_id=conversation_id
+        )
+        
+        response = agent.handle_query(request.prompt)
+        
+        return {
+            "success": True,
+            "response": response,
+            "conversation_id": conversation_id,
+            "is_new_conversation": is_new_conversation,
+            "agent": "content-creator"
+        }
+    except Exception as e:
+        print(f"Error in content creator endpoint: {e}")
+        return {"success": False, "error": str(e)}
+
+@router.get("/content-creator")
+def content_creator_status():
+    """Get content creator agent status"""
+    return {
+        "success": True,
+        "message": "Content Creator Agent is running!",
+        "agent": "content-creator",
+        "version": "1.0.0"
+    }
+
+# content-specific search endpoint
+@router.get("/content/search")
+def search_content_conversations(
+    query: str = Query(..., description="Search query"),
+    user_id: str = Query(..., description="User ID"),
+    limit: int = Query(10, description="Number of results to return")
+):
+    """Search content conversations using vector similarity"""
+    try:
+        search_results = search_content_conversations(
+            query=query,
+            user_id=user_id,
+            agent_type="content-creator",
+            top_k=limit
+        )
+        
+        return {
+            "success": True,
+            "results": search_results,
+            "count": len(search_results),
+            "query": query
+        }
+    except Exception as e:
+        print(f"[DEBUG] Content search route error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+# Add this endpoint
+@router.post("/seo-specialist")
+def seo_specialist_endpoint(request: ChatRequest):
+    """SEO specialist endpoint with automatic context handling"""
+    try:
+        # Create conversation if not provided
+        conversation_id = request.conversation_id
+        is_new_conversation = False
+        
+        if not conversation_id:
+            # Use AI-powered title generation with keyword fallback
+            dynamic_title = generate_dynamic_seo_title(request.prompt)
+            
+            conversation_id = MongoDB.create_conversation(
+                user_id=request.user_id,
+                agent="seo-specialist", 
+                title=dynamic_title
+            )
+            is_new_conversation = True
+
+        # Get agent and handle query
+        agent = get_seo_specialist_agent(
+            user_id=request.user_id,
+            conversation_id=conversation_id
+        )
+        
+        response = agent.handle_query(request.prompt)
+        
+        return {
+            "success": True,
+            "response": response,
+            "conversation_id": conversation_id,
+            "is_new_conversation": is_new_conversation,
+            "agent": "seo-specialist"
+        }
+    except Exception as e:
+        print(f"Error in SEO specialist endpoint: {e}")
+        return {"success": False, "error": str(e)}
+
+@router.get("/seo-specialist")
+def seo_specialist_status():
+    """Get SEO specialist agent status"""
+    return {
+        "success": True,
+        "message": "SEO Specialist Agent is running!",
+        "agent": "seo-specialist",
+        "version": "1.0.0"
+    }
+
+# SEO-specific search endpoint
+@router.get("/seo/search")
+def search_seo_conversations(
+    query: str = Query(..., description="Search query"),
+    user_id: str = Query(..., description="User ID"),
+    limit: int = Query(10, description="Number of results to return")
+):
+    """Search SEO conversations using vector similarity"""
+    try:
+        search_results = search_seo_conversations(
+            query=query,
+            user_id=user_id,
+            agent_type="seo-specialist",
+            top_k=limit
+        )
+        
+        return {
+            "success": True,
+            "results": search_results,
+            "count": len(search_results),
+            "query": query
+        }
+    except Exception as e:
+        print(f"[DEBUG] SEO search route error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+# Strategy Routes
+@router.post("/strategist")
+def mira_strategist_endpoint(request: ChatRequest):
+    """Mira strategist endpoint with automatic context handling"""
+    try:
+        # Create conversation if not provided
+        conversation_id = request.conversation_id
+        is_new_conversation = False
+        
+        if not conversation_id:
+            # Use AI-powered title generation with keyword fallback
+            dynamic_title = generate_dynamic_strategy_title(request.prompt)
+            
+            conversation_id = MongoDB.create_conversation(
+                user_id=request.user_id,
+                agent="strategist", 
+                title=dynamic_title
+            )
+            is_new_conversation = True
+
+        # Get agent and handle query
+        agent = get_mira_strategist_agent(
+            user_id=request.user_id,
+            conversation_id=conversation_id
+        )
+        
+        response = agent.handle_query(request.prompt)
+        
+        return {
+            "success": True,
+            "response": response,
+            "conversation_id": conversation_id,
+            "is_new_conversation": is_new_conversation,
+            "agent": "strategist"
+        }
+    except Exception as e:
+        print(f"Error in Mira strategist endpoint: {e}")
+        return {"success": False, "error": str(e)}
+
+@router.get("/strategist")
+def mira_strategist_status():
+    """Get Mira strategist agent status"""
+    return {
+        "success": True,
+        "message": "Mira Strategist Agent is running!",
+        "agent": "strategist",
+        "version": "1.0.0"
+    }
+
+# Strategy-specific search endpoint
+@router.get("/strategy/search")
+def search_strategy_conversations(
+    query: str = Query(..., description="Search query"),
+    user_id: str = Query(..., description="User ID"),
+    limit: int = Query(10, description="Number of results to return")
+):
+    """Search strategy conversations using vector similarity"""
+    try:
+        search_results = search_strategy_conversations(
+            query=query,
+            user_id=user_id,
+            agent_type="strategist",
+            top_k=limit
+        )
+        
+        return {
+            "success": True,
+            "results": search_results,
+            "count": len(search_results),
+            "query": query
+        }
+    except Exception as e:
+        print(f"[DEBUG] Strategy search route error: {e}")
+        return {"success": False, "error": str(e)}
+
+# Add title generation helper
+def generate_dynamic_strategy_title(prompt: str) -> str:
+    """Generate title for strategy conversations using OpenAI (fallback to keyword-based)"""
+    try:
+        openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        
+        response = openai_client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "Generate a short, descriptive title (3-5 words) for a strategic planning conversation based on the user's request. Focus on the strategic objective or planning type."},
+                {"role": "user", "content": f"User request: {prompt}"}
+            ],
+            max_tokens=20,
+            temperature=0.3
+        )
+        
+        ai_title = response.choices[0].message.content.strip()
+        
+        # Clean up the title (remove quotes, etc.)
+        ai_title = ai_title.replace('"', '').replace("'", '')
+        
+        # Validate length
+        if len(ai_title) > 50:
+            raise Exception("Title too long")
+            
+        print(f"[DEBUG] Generated AI strategy title: {ai_title}")
+        return ai_title
+        
+    except Exception as e:
+        print(f"[DEBUG] AI strategy title generation failed: {e}, using keyword-based")
+        return generate_strategy_title_pattern(prompt)  # Fallback to keyword-based
+
+def generate_strategy_title_pattern(prompt: str) -> str:
+    """Generate title for strategy conversations using keyword patterns"""
+    try:
+        prompt_clean = prompt.strip().lower()
+        
+        title_patterns = {
+            # Strategic Planning
+            "business strategy": "Business Strategy",
+            "strategic plan": "Strategic Planning",
+            "growth strategy": "Growth Strategy",
+            "business plan": "Business Planning",
+            "strategy": "Strategic Planning",
+            
+            # Goal Setting
+            "goal setting": "Goal Planning",
+            "goals": "Goal Strategy",
+            "objectives": "Objective Planning",
+            "targets": "Target Planning",
+            
+            # Market & Positioning
+            "market strategy": "Market Strategy",
+            "positioning": "Positioning Strategy",
+            "competitive strategy": "Competitive Strategy",
+            "market entry": "Market Entry Plan",
+            
+            # Growth & Scaling
+            "growth plan": "Growth Planning",
+            "scaling": "Scaling Strategy",
+            "expansion": "Expansion Plan",
+            "business growth": "Growth Strategy",
+            
+            # Launch & Development
+            "product launch": "Launch Strategy",
+            "launch plan": "Launch Planning",
+            "startup strategy": "Startup Strategy",
+            "mvp strategy": "MVP Planning",
+            
+            # Revenue & Business Model
+            "revenue strategy": "Revenue Planning",
+            "business model": "Business Model",
+            "monetization": "Monetization Strategy",
+            "pricing strategy": "Pricing Strategy",
+            
+            # Team & Operations
+            "team strategy": "Team Planning",
+            "operational strategy": "Operations Strategy",
+            "resource planning": "Resource Planning",
+            
+            # General
+            "roadmap": "Strategic Roadmap",
+            "planning": "Strategic Planning",
+            "vision": "Vision Planning",
+            "mission": "Mission Planning"
+        }
+        
+        # Check for specific patterns (most specific first)
+        for keyword, title in title_patterns.items():
+            if keyword in prompt_clean:
+                return title
+        
+        # Extract strategic terms from prompt
+        strategy_terms = ['strategy', 'plan', 'goal', 'vision', 'growth', 'business']
+        found_terms = []
+        
+        words = prompt.split()
+        for word in words:
+            if word.lower() in strategy_terms or any(term in word.lower() for term in strategy_terms):
+                found_terms.append(word)
+                if len(found_terms) >= 2:
+                    break
+        
+        if found_terms:
+            title = " ".join(found_terms).title()
+            if "strategy" not in title.lower() and "plan" not in title.lower():
+                title += " Strategy"
+            return title
+        
+        # Default patterns based on action words
+        if any(word in prompt_clean for word in ['grow', 'scale', 'expand', 'increase']):
+            return "Growth Strategy"
+        elif any(word in prompt_clean for word in ['launch', 'start', 'begin', 'create']):
+            return "Launch Planning"
+        elif any(word in prompt_clean for word in ['improve', 'optimize', 'enhance']):
+            return "Strategy Optimization"
+        
+        return "Strategic Planning"
+        
+    except Exception as e:
+        print(f"[DEBUG] Strategy title pattern generation error: {e}")
+        return "Strategy Chat"
+
+
+def generate_dynamic_content_title(prompt: str) -> str:
+    """Generate title for content creation conversations using OpenAI (fallback to keyword-based)"""
+    try:
+        openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        
+        response = openai_client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "Generate a short, descriptive title (3-5 words) for a content creation conversation based on the user's request. Focus on the content type and platform."},
+                {"role": "user", "content": f"User request: {prompt}"}
+            ],
+            max_tokens=20,
+            temperature=0.3
+        )
+        
+        ai_title = response.choices[0].message.content.strip()
+        
+        # Clean up the title (remove quotes, etc.)
+        ai_title = ai_title.replace('"', '').replace("'", '')
+        
+        # Validate length
+        if len(ai_title) > 50:
+            raise Exception("Title too long")
+            
+        print(f"[DEBUG] Generated AI content title: {ai_title}")
+        return ai_title
+        
+    except Exception as e:
+        print(f"[DEBUG] AI content title generation failed: {e}, using keyword-based")
+        return generate_content_title_pattern(prompt)  # Fallback to keyword-based
+
+def generate_content_title_pattern(prompt: str) -> str:
+    """Generate title for content creation conversations using keyword patterns"""
+    try:
+        prompt_clean = prompt.strip().lower()
+        
+        title_patterns = {
+            # Platform-specific content
+            "instagram caption": "Instagram Caption",
+            "instagram post": "Instagram Content",
+            "instagram story": "Instagram Story",
+            "instagram": "Instagram Content",
+            
+            "linkedin post": "LinkedIn Post",
+            "linkedin article": "LinkedIn Article", 
+            "linkedin": "LinkedIn Content",
+            
+            "facebook post": "Facebook Post",
+            "facebook ad": "Facebook Ad",
+            "facebook": "Facebook Content",
+            
+            "twitter post": "Twitter Post",
+            "twitter thread": "Twitter Thread",
+            "twitter": "Twitter Content",
+            
+            "youtube script": "YouTube Script",
+            "youtube description": "YouTube Description",
+            "youtube": "YouTube Content",
+            
+            "tiktok script": "TikTok Script",
+            "tiktok": "TikTok Content",
+            
+            # Content types
+            "blog article": "Blog Article",
+            "blog post": "Blog Writing",
+            "blog": "Blog Writing",
+            
+            "newsletter": "Newsletter Content",
+            "email campaign": "Email Campaign",
+            "email": "Email Content",
+            
+            "product description": "Product Description",
+            "landing page copy": "Landing Page Copy",
+            "website copy": "Website Copy",
+            
+            "press release": "Press Release",
+            "case study": "Case Study",
+            
+            "script": "Script Writing",
+            "ad copy": "Ad Copy",
+            "sales copy": "Sales Copy",
+            
+            # General content
+            "content strategy": "Content Strategy",
+            "content plan": "Content Planning",
+            "content calendar": "Content Calendar",
+            "content": "Content Creation",
+            "write": "Content Writing",
+            "copy": "Copywriting"
+        }
+        
+        # Check for specific patterns (most specific first)
+        for keyword, title in title_patterns.items():
+            if keyword in prompt_clean:
+                return title
+        
+        # Extract main action/content type from prompt
+        words = prompt.split()
+        if len(words) <= 3:
+            return prompt.title()
+        else:
+            # Take first 2-3 words that seem content-related
+            content_words = []
+            for word in words[:4]:
+                if word.lower() in ['create', 'write', 'generate', 'make', 'post', 'content', 'copy', 'script']:
+                    continue
+                content_words.append(word)
+                if len(content_words) >= 2:
+                    break
+            
+            if content_words:
+                title = " ".join(content_words).title()
+                if "content" not in title.lower():
+                    title += " Content"
+                return title
+        
+        return "Content Creation"
+        
+    except Exception as e:
+        print(f"[DEBUG] Content title pattern generation error: {e}")
+        return "Content Chat"
+
+def generate_dynamic_seo_title(prompt: str) -> str:
+    """Generate title for SEO conversations using OpenAI (fallback to keyword-based)"""
+    try:
+        openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        
+        response = openai_client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "Generate a short, descriptive title (3-5 words) for an SEO consultation conversation based on the user's request. Focus on the SEO service or optimization type."},
+                {"role": "user", "content": f"User request: {prompt}"}
+            ],
+            max_tokens=20,
+            temperature=0.3
+        )
+        
+        ai_title = response.choices[0].message.content.strip()
+        
+        # Clean up the title (remove quotes, etc.)
+        ai_title = ai_title.replace('"', '').replace("'", '')
+        
+        # Validate length
+        if len(ai_title) > 50:
+            raise Exception("Title too long")
+            
+        print(f"[DEBUG] Generated AI SEO title: {ai_title}")
+        return ai_title
+        
+    except Exception as e:
+        print(f"[DEBUG] AI SEO title generation failed: {e}, using keyword-based")
+        return generate_seo_title_pattern(prompt)  # Fallback to keyword-based
+
+def generate_seo_title_pattern(prompt: str) -> str:
+    """Generate title for SEO conversations using keyword patterns"""
+    try:
+        prompt_clean = prompt.strip().lower()
+        
+        title_patterns = {
+            # SEO Services
+            "seo audit": "SEO Audit",
+            "technical seo": "Technical SEO",
+            "seo analysis": "SEO Analysis",
+            "seo strategy": "SEO Strategy",
+            "seo consultation": "SEO Consultation",
+            
+            # Keyword Research
+            "keyword research": "Keyword Research",
+            "keyword analysis": "Keyword Analysis", 
+            "keyword strategy": "Keyword Strategy",
+            "keyword optimization": "Keyword Optimization",
+            "keyword": "Keyword Research",
+            
+            # Content Optimization
+            "content brief": "SEO Content Brief",
+            "content optimization": "Content Optimization",
+            "seo brief": "SEO Content Brief",
+            "blog seo": "Blog SEO",
+            "article seo": "Article SEO",
+            
+            # Meta Optimization
+            "meta tags": "Meta Tag Optimization",
+            "meta description": "Meta Optimization",
+            "title tag": "Title Tag Optimization",
+            "meta": "Meta Optimization",
+            
+            # Page Types
+            "landing page seo": "Landing Page SEO",
+            "homepage seo": "Homepage SEO", 
+            "product page seo": "Product Page SEO",
+            "service page seo": "Service Page SEO",
+            "category page seo": "Category Page SEO",
+            
+            # Local SEO
+            "local seo": "Local SEO Strategy",
+            "google my business": "Google My Business",
+            "local optimization": "Local SEO",
+            "local search": "Local SEO",
+            
+            # Technical
+            "site speed": "Site Speed Optimization",
+            "page speed": "Page Speed SEO",
+            "mobile seo": "Mobile SEO",
+            "core web vitals": "Core Web Vitals",
+            "schema markup": "Schema Markup",
+            
+            # Goals
+            "increase traffic": "SEO Traffic Strategy",
+            "improve ranking": "SEO Ranking Strategy", 
+            "boost visibility": "SEO Visibility",
+            "organic traffic": "Organic Traffic SEO",
+            "search ranking": "Search Ranking",
+            "serp ranking": "SERP Optimization",
+            
+            # Content Types
+            "blog optimization": "Blog SEO",
+            "ecommerce seo": "E-commerce SEO",
+            "video seo": "Video SEO",
+            "image seo": "Image SEO",
+            
+            # General
+            "seo help": "SEO Assistance",
+            "seo tips": "SEO Guidance",
+            "seo advice": "SEO Consultation",
+            "optimize": "SEO Optimization",
+            "ranking": "SEO Ranking",
+            "traffic": "SEO Traffic",
+            "visibility": "SEO Visibility",
+            "seo": "SEO Strategy"
+        }
+        
+        # Check for specific patterns (most specific first)
+        for keyword, title in title_patterns.items():
+            if keyword in prompt_clean:
+                return title
+        
+        # Extract SEO-related terms from prompt
+        seo_terms = ['seo', 'optimize', 'ranking', 'traffic', 'keyword', 'search', 'visibility']
+        found_terms = []
+        
+        words = prompt.split()
+        for word in words:
+            if word.lower() in seo_terms or any(term in word.lower() for term in seo_terms):
+                found_terms.append(word)
+                if len(found_terms) >= 2:
+                    break
+        
+        if found_terms:
+            title = " ".join(found_terms).title()
+            if "seo" not in title.lower():
+                title += " SEO"
+            return title
+        
+        # Default patterns based on action words
+        if any(word in prompt_clean for word in ['improve', 'increase', 'boost', 'enhance']):
+            return "SEO Improvement"
+        elif any(word in prompt_clean for word in ['analyze', 'audit', 'check', 'review']):
+            return "SEO Analysis"
+        elif any(word in prompt_clean for word in ['create', 'build', 'develop', 'plan']):
+            return "SEO Strategy"
+        
+        return "SEO Consultation"
+        
+    except Exception as e:
+        print(f"[DEBUG] SEO title pattern generation error: {e}")
+        return "SEO Chat"

@@ -210,3 +210,91 @@ class MongoDB:
         except Exception as e:
             print(f"[DEBUG] Error updating brand design: {e}")
             return False
+        
+
+
+    # Content Preferences Routes
+    @staticmethod
+    def get_user_content_preferences(user_id: str):
+        """Get user's content preferences"""
+        try:
+            user = users_collection.find_one({"_id": ObjectId(user_id)})
+            if user and "contentPreferences" in user:
+                return user["contentPreferences"]
+            return {}
+        except Exception as e:
+            print(f"[DEBUG] Error getting content preferences: {e}")
+            return {}
+
+    @staticmethod
+    def update_user_content_preferences(user_id: str, content_prefs: dict):
+        """Update user's content preferences"""
+        try:
+            result = users_collection.update_one(
+                {"_id": ObjectId(user_id)},
+                {"$set": {"contentPreferences": content_prefs}},
+                upsert=True
+            )
+            return result.modified_count > 0 or result.upserted_id is not None
+        except Exception as e:
+            print(f"[DEBUG] Error updating content preferences: {e}")
+            return False
+
+    # SEO Routes
+    @staticmethod
+    def get_user_seo_preferences(user_id: str):
+        """Get user's SEO preferences"""
+        try:
+            user = users_collection.find_one({"_id": ObjectId(user_id)})
+            if user and "seoPreferences" in user:
+                return user["seoPreferences"]
+            return {}
+        except Exception as e:
+            print(f"[DEBUG] Error getting SEO preferences: {e}")
+            return {}
+
+    @staticmethod
+    def update_user_seo_preferences(user_id: str, seo_prefs: dict):
+        """Update user's SEO preferences"""
+        try:
+            result = users_collection.update_one(
+                {"_id": ObjectId(user_id)},
+                {"$set": {"seoPreferences": seo_prefs}},
+                upsert=True
+            )
+            return result.modified_count > 0 or result.upserted_id is not None
+        except Exception as e:
+            print(f"[DEBUG] Error updating SEO preferences: {e}")
+            return False
+
+
+
+
+
+
+    # Strategy Preferences Routes
+    @staticmethod
+    def get_user_strategy_preferences(user_id: str):
+        """Get user's strategy preferences"""
+        try:
+            user = users_collection.find_one({"_id": ObjectId(user_id)})
+            if user and "strategyPreferences" in user:
+                return user["strategyPreferences"]
+            return {}
+        except Exception as e:
+            print(f"[DEBUG] Error getting strategy preferences: {e}")
+            return {}
+
+    @staticmethod
+    def update_user_strategy_preferences(user_id: str, strategy_prefs: dict):
+        """Update user's strategy preferences"""
+        try:
+            result = users_collection.update_one(
+                {"_id": ObjectId(user_id)},
+                {"$set": {"strategyPreferences": strategy_prefs}},
+                upsert=True
+            )
+            return result.modified_count > 0 or result.upserted_id is not None
+        except Exception as e:
+            print(f"[DEBUG] Error updating strategy preferences: {e}")
+            return False
