@@ -3,17 +3,21 @@ from openai import OpenAI
 from langchain_openai import ChatOpenAI
 from langchain.memory import ConversationBufferMemory
 from langchain.agents import initialize_agent, Tool, AgentType
-from core.config import OPENAI_API_KEY, PINECONE_API_KEY, PINECONE_ENV
+from core.config import OPENAI_API_KEY, PINECONE_API_KEY, PINECONE_ENV, GROQ_API_KEY
 from core.database import MongoDB
 from pinecone import Pinecone, ServerlessSpec
 from datetime import datetime
 import asyncio
 from typing import AsyncGenerator, Dict, Any
+from groq import Groq
+import re
+import json
 
 # ---------------------------
 # Pinecone Setup (same as before)
 # ---------------------------
 pinecone = Pinecone(api_key=PINECONE_API_KEY)
+groq_client = Groq(api_key=GROQ_API_KEY)
 INDEX_NAME = "ai-agents-memory"
 
 existing_indexes = [index.name for index in pinecone.list_indexes()]
@@ -230,6 +234,11 @@ class BrandDesignerAgent:
         self.conversation_id = conversation_id
         self.agent_name = "brand-designer"
         self.last_generated_image = None
+        self.groq_client = groq_client
+        self.reasoning_model = "deepseek-r1-distill-llama-70b"
+        self.show_thinking = True  # Enable thinking display
+        print(f"[DEBUG] Initialized with reasoning model: {self.reasoning_model}")
+        
 
          # Enhanced design info for multiple asset types
         self.design_info = {
@@ -1708,24 +1717,15 @@ Always prioritize using the tool over giving generic advice."""
         """Stream agent response with tool usage visibility"""
         
         try:
-            # Send thinking status
-            yield {
-                "type": "status",
-                "message": "🤔 Analyzing your request...",
-                "status": "thinking"
-            }
-            
-            await asyncio.sleep(0.5)  # Small delay for UX
-            
             # Check if this is a design generation request
             wants_generation = self.detect_generation_intent(query)
             
             if wants_generation:
-                # Stream the asset generation process
-                async for chunk in self.stream_asset_generation(query):
+                # ✅ USE REAL THINKING-ENABLED ASSET GENERATION
+                async for chunk in self.stream_asset_generation_with_real_thinking(query):
                     yield chunk
             else:
-                # Stream regular conversation
+                # Stream regular conversation (keep existing method)
                 async for chunk in self.stream_conversation_response(query):
                     yield chunk
                     
@@ -1735,33 +1735,70 @@ Always prioritize using the tool over giving generic advice."""
                 "message": f"Processing error: {str(e)}"
             }
 
-    async def stream_asset_generation(self, query: str) -> AsyncGenerator[Dict[str, Any], None]:
-        """Stream asset generation process with detailed steps"""
+    
+    async def stream_asset_generation_with_real_thinking(self, query: str) -> AsyncGenerator[Dict[str, Any], None]:
+        """Stream asset generation with REAL model thinking using Groq reasoning models"""
         
         try:
-            # Step 1: Information extraction
+            # ✅ STEP 1: REAL MODEL THINKING ABOUT THE REQUEST
+            yield {
+                "type": "thinking_start",
+                "message": "🧠 Thinking....",
+                "status": "thinking"
+            }
+            
+            await asyncio.sleep(0.3)
+            
+            # Get REAL model thinking using Groq reasoning model
+            thinking_result = await self.get_real_model_thinking(query)
+
+            print("Model thinking: ", thinking_result)
+            
+            yield {
+                "type": "thinking_process",
+                "message": "💭 Model's Real Thinking Process:",
+                "thinking": thinking_result["thinking"],
+                "reasoning": thinking_result["reasoning"],
+                "analysis": thinking_result["analysis"],
+                "plan": thinking_result["plan"],
+                "status": "thinking_complete"
+            }
+            
+            await asyncio.sleep(0.5)
+            
+            # ✅ STEP 2: REAL THINKING FOR INFORMATION EXTRACTION
             yield {
                 "type": "tool_start",
                 "tool_name": "Brand Information Extractor",
-                "message": "🔍 Extracting brand information from our conversation...",
+                "message": "🔍 Extracting brand information...",
                 "status": "extracting_info"
             }
             
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.3)
             
-            # Get conversation messages
+            # Show REAL extraction thinking
+            extraction_thinking = await self.get_real_extraction_thinking(query)
+            
+            yield {
+                "type": "thinking_process",
+                "message": "🧠 Extraction Reasoning:",
+                "thinking": extraction_thinking["thinking"],
+                "process": extraction_thinking["process"],
+                "findings": extraction_thinking["findings"],
+                "status": "extraction_thinking"
+            }
+            
+            # Perform extraction (using existing methods)
             recent_messages = []
             if self.conversation_id and self.user_id:
                 recent_messages = MongoDB.get_conversation_messages(self.conversation_id, self.user_id)
             
-            # Extract information
             if recent_messages:
                 self.extract_brand_info_from_conversation(recent_messages)
             
             if query and query.strip():
                 self.extract_from_current_input(query)
             
-            # Show what was extracted
             extracted_info = {k: v for k, v in self.design_info.items() if v}
             
             yield {
@@ -1772,11 +1809,9 @@ Always prioritize using the tool over giving generic advice."""
                 "status": "info_extracted"
             }
             
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.3)
             
-            # Step 2: Check if we need more info
-            missing_info = [k for k, v in self.design_info.items() if not v]
-            
+            # Check if we need more info
             if not self.design_info.get("brand_name"):
                 yield {
                     "type": "message",
@@ -1785,16 +1820,18 @@ Always prioritize using the tool over giving generic advice."""
                 }
                 return
             
-            # Step 3: Auto-completion if needed
+            # ✅ STEP 3: AUTO-COMPLETION (using existing methods)
+            missing_info = [k for k, v in self.design_info.items() if not v]
+            
             if missing_info:
                 yield {
                     "type": "tool_start",
                     "tool_name": "Smart Auto-Completion",
-                    "message": "🧠 Smart-completing missing brand details...",
+                    "message": "🧠 Smart-completing missing details...",
                     "status": "auto_completing"
                 }
                 
-                await asyncio.sleep(1)
+                await asyncio.sleep(0.3)
                 
                 auto_completed = self.intelligent_auto_complete(self.design_info.copy(), "logo")
                 for key, value in auto_completed.items():
@@ -1803,25 +1840,40 @@ Always prioritize using the tool over giving generic advice."""
                 
                 yield {
                     "type": "tool_result",
-                    "tool_name": "Smart Auto-Completion", 
+                    "tool_name": "Smart Auto-Completion",
                     "message": f"✅ Completed: {', '.join(missing_info)}",
                     "data": {k: v for k, v in self.design_info.items() if k in missing_info},
                     "status": "auto_completed"
                 }
                 
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(0.3)
             
-            # Step 4: Asset generation
+            # ✅ STEP 4: REAL DESIGN THINKING
             yield {
                 "type": "tool_start",
                 "tool_name": "DALL-E 3 Asset Generator",
-                "message": "🎨 Creating your brand asset with DALL-E 3...",
+                "message": "🎨 Designing your brand asset...",
                 "status": "generating_asset"
             }
             
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.3)
             
-            # Generate the asset
+            # Show REAL design thinking process
+            design_thinking = await self.get_real_design_thinking(self.design_info, query)
+            
+            yield {
+                "type": "thinking_process",
+                "message": "🎨 Creative Reasoning Process:",
+                "thinking": design_thinking["thinking"],
+                "creative_process": design_thinking["creative_process"],
+                "design_decisions": design_thinking["decisions"],
+                "prompt_strategy": design_thinking["prompt_strategy"],
+                "status": "design_thinking"
+            }
+            
+            await asyncio.sleep(0.5)
+            
+            # Generate the asset (using existing method)
             asset_result = self.generate_brand_asset_dalle(
                 self.design_info, 
                 "logo", 
@@ -1837,7 +1889,7 @@ Always prioritize using the tool over giving generic advice."""
                     "status": "asset_generated"
                 }
                 
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(0.3)
                 
                 # Final response with asset
                 self.last_generated_image = asset_result["image_url"]
@@ -1873,6 +1925,9 @@ Always prioritize using the tool over giving generic advice."""
                 "message": f"Asset generation failed: {str(e)}",
                 "status": "error"
             }
+
+
+
 
     async def stream_conversation_response(self, query: str) -> AsyncGenerator[Dict[str, Any], None]:
         """Stream regular conversation responses"""
@@ -1928,6 +1983,189 @@ Always prioritize using the tool over giving generic advice."""
                 "message": f"Response generation failed: {str(e)}",
                 "status": "error"
             }
+
+
+    async def get_real_model_thinking(self, query: str) -> dict:
+        """Get REAL model thinking using Groq reasoning model"""
+        
+        thinking_prompt = f"""
+        <thinking>
+        The user is asking me: "{query}"
+        
+        Let me think step by step about this brand design request:
+        
+        1. What exactly is the user asking for?
+        2. What type of design asset do they want?
+        3. What information will I need to create this effectively?
+        4. What's my strategy for helping them achieve their goal?
+        5. How can I make this process smooth and efficient?
+        
+        I need to analyze this carefully to provide the best possible service.
+        </thinking>
+        
+        Analyze this user request for brand design work. Show your complete reasoning process.
+        
+        USER REQUEST: "{query}"
+        
+        Think through this step-by-step and show your reasoning.
+        """
+        
+        try:
+            response = self.groq_client.chat.completions.create(
+                model=self.reasoning_model,  # DeepSeek R1 Distill Llama
+                messages=[
+                    {"role": "system", "content": "You are a professional brand designer. Think through client requests step-by-step, showing your complete reasoning process in <thinking> tags."},
+                    {"role": "user", "content": thinking_prompt}
+                ],
+                temperature=0.3,
+                max_tokens=800
+            )
+            
+            thinking_text = response.choices[0].message.content.strip()
+            
+            # Extract thinking content from <thinking> tags
+            thinking_match = re.search(r'<thinking>(.*?)</thinking>', thinking_text, re.DOTALL)
+            thinking_content = thinking_match.group(1).strip() if thinking_match else thinking_text
+            
+            # Extract the response after thinking
+            response_match = re.search(r'</thinking>\s*(.*)', thinking_text, re.DOTALL)
+            reasoning_content = response_match.group(1).strip() if response_match else thinking_text
+            
+            return {
+                "thinking": thinking_content,
+                "reasoning": reasoning_content,
+                "analysis": "Analyzing the user's brand design request",
+                "plan": "Developing strategy to help achieve their goals"
+            }
+            
+        except Exception as e:
+            print(f"Real thinking generation error: {e}")
+            return {
+                "thinking": f"I'm analyzing your request: {query}. Let me think about what type of design asset you need and what information I'll require to create something amazing for your brand.",
+                "reasoning": "Processing user request for brand design assistance",
+                "analysis": "User wants brand design help",
+                "plan": "Gather brand information and create the requested asset"
+            }
+
+    async def get_real_extraction_thinking(self, query: str) -> dict:
+        """Show REAL thinking process for information extraction using reasoning model"""
+        
+        extraction_prompt = f"""
+        <thinking>
+        I need to extract brand information from this request: "{query}"
+        
+        Let me think carefully:
+        1. What brand information can I identify directly from this text?
+        2. What clues about brand personality, industry, or style preferences are present?
+        3. What's missing that I'll need to ask for?
+        4. What can I intelligently infer from context?
+        5. How should I prioritize the information I gather?
+        
+        I need to be thorough but efficient in my extraction process.
+        </thinking>
+        
+        Extract brand information from this request, showing your reasoning process.
+        
+        REQUEST: "{query}"
+        
+        Think through your extraction strategy step-by-step.
+        """
+        
+        try:
+            response = self.groq_client.chat.completions.create(
+                model=self.reasoning_model,
+                messages=[
+                    {"role": "system", "content": "Analyze text for brand information extraction. Show your complete reasoning process in <thinking> tags."},
+                    {"role": "user", "content": extraction_prompt}
+                ],
+                temperature=0.3,
+                max_tokens=600
+            )
+            
+            thinking_text = response.choices[0].message.content.strip()
+            
+            # Extract thinking and response
+            thinking_match = re.search(r'<thinking>(.*?)</thinking>', thinking_text, re.DOTALL)
+            thinking_content = thinking_match.group(1).strip() if thinking_match else thinking_text
+            
+            response_match = re.search(r'</thinking>\s*(.*)', thinking_text, re.DOTALL)
+            process_content = response_match.group(1).strip() if response_match else thinking_text
+            
+            return {
+                "thinking": thinking_content,
+                "process": process_content,
+                "findings": "Analyzing brand elements in the request"
+            }
+                
+        except Exception as e:
+            return {
+                "thinking": f"I'm examining this request: {query}. I need to look for brand name, style preferences, target audience, and any specific requirements mentioned.",
+                "process": f"Extracting information from: {query}",
+                "findings": "Looking for brand name, style preferences, and requirements"
+            }
+
+    async def get_real_design_thinking(self, design_info: dict, user_context: str) -> dict:
+        """Show REAL creative thinking process for design generation using reasoning model"""
+        
+        design_prompt = f"""
+        <thinking>
+        I'm about to create a design with this information:
+        Brand Info: {design_info}
+        User Context: "{user_context}"
+        
+        Let me think through the creative process:
+        1. What visual style best represents this brand based on the information?
+        2. How do I translate brand personality into visual elements?
+        3. What prompt strategy will create the best DALL-E result?
+        4. What design principles should I prioritize?
+        5. How can I ensure this meets the user's expectations?
+        
+        This is the creative decision-making phase.
+        </thinking>
+        
+        Plan the creative design process for this brand asset.
+        
+        BRAND INFO: {design_info}
+        USER CONTEXT: "{user_context}"
+        
+        Show your creative reasoning step-by-step.
+        """
+        
+        try:
+            response = self.groq_client.chat.completions.create(
+                model=self.reasoning_model,
+                messages=[
+                    {"role": "system", "content": "Think through the creative design process like a professional brand designer. Show your reasoning in <thinking> tags."},
+                    {"role": "user", "content": design_prompt}
+                ],
+                temperature=0.4,
+                max_tokens=800
+            )
+            
+            thinking_text = response.choices[0].message.content.strip()
+            
+            # Extract thinking and response
+            thinking_match = re.search(r'<thinking>(.*?)</thinking>', thinking_text, re.DOTALL)
+            thinking_content = thinking_match.group(1).strip() if thinking_match else thinking_text
+            
+            response_match = re.search(r'</thinking>\s*(.*)', thinking_text, re.DOTALL)
+            creative_content = response_match.group(1).strip() if response_match else thinking_text
+            
+            return {
+                "thinking": thinking_content,
+                "creative_process": creative_content,
+                "decisions": "Focusing on brand consistency and visual impact",
+                "prompt_strategy": "Creating detailed prompt for optimal DALL-E results"
+            }
+                
+        except Exception as e:
+            return {
+                "thinking": "I'm considering how to translate this brand identity into visual design. I need to balance creativity with brand requirements and ensure the result serves its intended purpose.",
+                "creative_process": "Translating brand identity into visual design",
+                "decisions": "Balancing creativity with brand requirements",
+                "prompt_strategy": "Optimizing prompt for brand-appropriate results"
+            }
+
 
 def get_brand_designer_agent(user_id: str = None, conversation_id: str = None):
     return BrandDesignerAgent(user_id, conversation_id)

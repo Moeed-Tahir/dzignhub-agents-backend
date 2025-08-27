@@ -8,6 +8,7 @@ GOOGLE_API_KEY = os.getenv("GEMINI_API")
 ANTHROPIC_API = os.getenv("ANTHROPIC_API")
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 PINECONE_ENV = os.getenv("PINECONE_ENV")
+GROQ_API_KEY = os.getenv("GROQ_API")
 
 
 # MongoDB Configuration
