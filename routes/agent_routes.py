@@ -9,6 +9,10 @@ from agents.seo_specialist import get_seo_specialist_agent, search_seo_conversat
 from agents.mira_strategist import get_mira_strategist_agent, search_strategy_conversations
 from openai import OpenAI
 import os
+from fastapi.responses import StreamingResponse
+import json
+import asyncio
+from typing import AsyncGenerator
 
 router = APIRouter()
 
@@ -344,6 +348,69 @@ def delete_message(message_id: str, user_id: str = Query(...)):
             "message": "Message deleted successfully"
         }
     except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@router.post("/brand-designer/stream")
+async def brand_designer_stream_endpoint(request: ChatRequest):
+    """Brand designer endpoint with streaming responses"""
+    try:
+        # Create conversation if not provided
+        conversation_id = request.conversation_id
+        is_new_conversation = False
+        
+        if not conversation_id:
+            dynamic_title = generate_dynamic_title(request.prompt)
+            conversation_id = MongoDB.create_conversation(
+                user_id=request.user_id,
+                agent="brand-designer", 
+                title=dynamic_title
+            )
+            is_new_conversation = True
+
+        # Get agent
+        agent = get_brand_designer_agent(
+            user_id=request.user_id,
+            conversation_id=conversation_id
+        )
+        
+        # Create streaming generator
+        async def generate_stream():
+            try:
+                # Send initial response
+                initial_data = {
+                    "type": "conversation_info",
+                    "conversation_id": conversation_id,
+                    "is_new_conversation": is_new_conversation,
+                    "agent": "brand-designer"
+                }
+                yield f"data: {json.dumps(initial_data)}\n\n"
+                
+                # Stream the agent response
+                async for chunk in agent.handle_query_stream(request.prompt):
+                    yield f"data: {json.dumps(chunk)}\n\n"
+                
+                # Send completion signal
+                completion_data = {"type": "complete"}
+                yield f"data: {json.dumps(completion_data)}\n\n"
+                
+            except Exception as e:
+                error_data = {"type": "error", "message": str(e)}
+                yield f"data: {json.dumps(error_data)}\n\n"
+
+        return StreamingResponse(
+            generate_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "*",
+            }
+        )
+        
+    except Exception as e:
+        print(f"Error in brand designer stream endpoint: {e}")
         return {"success": False, "error": str(e)}
 
 # Status Routes

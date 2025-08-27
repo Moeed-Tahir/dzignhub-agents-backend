@@ -7,6 +7,9 @@ from core.config import OPENAI_API_KEY, PINECONE_API_KEY, PINECONE_ENV
 from core.database import MongoDB
 from pinecone import Pinecone, ServerlessSpec
 from datetime import datetime
+import asyncio
+from typing import AsyncGenerator, Dict, Any
+
 # ---------------------------
 # Pinecone Setup (same as before)
 # ---------------------------
@@ -1666,6 +1669,265 @@ Always prioritize using the tool over giving generic advice."""
         )
         
         return ai_response
+
+
+    async def handle_query_stream(self, query: str) -> AsyncGenerator[Dict[str, Any], None]:
+        """Handle user query with streaming responses"""
+        
+        # Save user message to MongoDB
+        if self.conversation_id and self.user_id:
+            MongoDB.save_message(
+                conversation_id=self.conversation_id,
+                user_id=self.user_id,
+                sender='user',
+                text=query
+            )
+            
+        # Store user query in Pinecone
+        store_in_pinecone(
+            agent_type="brand-designer", 
+            role="user", 
+            text=query,
+            user_id=self.user_id,
+            conversation_id=self.conversation_id
+        )
+
+        try:
+            # Stream the agent processing
+            async for chunk in self.stream_agent_response(query):
+                yield chunk
+                
+        except Exception as e:
+            print(f"Streaming error: {e}")
+            yield {
+                "type": "error",
+                "message": "I'm experiencing technical difficulties. Please try again in a moment."
+            }
+
+    async def stream_agent_response(self, query: str) -> AsyncGenerator[Dict[str, Any], None]:
+        """Stream agent response with tool usage visibility"""
+        
+        try:
+            # Send thinking status
+            yield {
+                "type": "status",
+                "message": "🤔 Analyzing your request...",
+                "status": "thinking"
+            }
+            
+            await asyncio.sleep(0.5)  # Small delay for UX
+            
+            # Check if this is a design generation request
+            wants_generation = self.detect_generation_intent(query)
+            
+            if wants_generation:
+                # Stream the asset generation process
+                async for chunk in self.stream_asset_generation(query):
+                    yield chunk
+            else:
+                # Stream regular conversation
+                async for chunk in self.stream_conversation_response(query):
+                    yield chunk
+                    
+        except Exception as e:
+            yield {
+                "type": "error", 
+                "message": f"Processing error: {str(e)}"
+            }
+
+    async def stream_asset_generation(self, query: str) -> AsyncGenerator[Dict[str, Any], None]:
+        """Stream asset generation process with detailed steps"""
+        
+        try:
+            # Step 1: Information extraction
+            yield {
+                "type": "tool_start",
+                "tool_name": "Brand Information Extractor",
+                "message": "🔍 Extracting brand information from our conversation...",
+                "status": "extracting_info"
+            }
+            
+            await asyncio.sleep(1)
+            
+            # Get conversation messages
+            recent_messages = []
+            if self.conversation_id and self.user_id:
+                recent_messages = MongoDB.get_conversation_messages(self.conversation_id, self.user_id)
+            
+            # Extract information
+            if recent_messages:
+                self.extract_brand_info_from_conversation(recent_messages)
+            
+            if query and query.strip():
+                self.extract_from_current_input(query)
+            
+            # Show what was extracted
+            extracted_info = {k: v for k, v in self.design_info.items() if v}
+            
+            yield {
+                "type": "tool_result",
+                "tool_name": "Brand Information Extractor",
+                "message": f"✅ Extracted: {', '.join(extracted_info.keys())}",
+                "data": extracted_info,
+                "status": "info_extracted"
+            }
+            
+            await asyncio.sleep(0.5)
+            
+            # Step 2: Check if we need more info
+            missing_info = [k for k, v in self.design_info.items() if not v]
+            
+            if not self.design_info.get("brand_name"):
+                yield {
+                    "type": "message",
+                    "message": self.ask_comprehensive_logo_questions("logo"),
+                    "status": "awaiting_input"
+                }
+                return
+            
+            # Step 3: Auto-completion if needed
+            if missing_info:
+                yield {
+                    "type": "tool_start",
+                    "tool_name": "Smart Auto-Completion",
+                    "message": "🧠 Smart-completing missing brand details...",
+                    "status": "auto_completing"
+                }
+                
+                await asyncio.sleep(1)
+                
+                auto_completed = self.intelligent_auto_complete(self.design_info.copy(), "logo")
+                for key, value in auto_completed.items():
+                    if not self.design_info.get(key):
+                        self.design_info[key] = value
+                
+                yield {
+                    "type": "tool_result",
+                    "tool_name": "Smart Auto-Completion", 
+                    "message": f"✅ Completed: {', '.join(missing_info)}",
+                    "data": {k: v for k, v in self.design_info.items() if k in missing_info},
+                    "status": "auto_completed"
+                }
+                
+                await asyncio.sleep(0.5)
+            
+            # Step 4: Asset generation
+            yield {
+                "type": "tool_start",
+                "tool_name": "DALL-E 3 Asset Generator",
+                "message": "🎨 Creating your brand asset with DALL-E 3...",
+                "status": "generating_asset"
+            }
+            
+            await asyncio.sleep(1)
+            
+            # Generate the asset
+            asset_result = self.generate_brand_asset_dalle(
+                self.design_info, 
+                "logo", 
+                "1024x1024", 
+                user_context=query
+            )
+            
+            if asset_result["type"] == "asset_generated":
+                yield {
+                    "type": "tool_result",
+                    "tool_name": "DALL-E 3 Asset Generator",
+                    "message": "✅ Asset generated successfully!",
+                    "status": "asset_generated"
+                }
+                
+                await asyncio.sleep(0.5)
+                
+                # Final response with asset
+                self.last_generated_image = asset_result["image_url"]
+                
+                yield {
+                    "type": "asset_generated",
+                    "message": asset_result["message"],
+                    "image_url": asset_result["image_url"],
+                    "brand_info": asset_result["brand_info"],
+                    "status": "complete"
+                }
+                
+                # Save to MongoDB
+                if self.conversation_id and self.user_id:
+                    final_response = f"""ASSET_GENERATED|{asset_result['image_url']}|{asset_result['message']}"""
+                    MongoDB.save_message(
+                        conversation_id=self.conversation_id,
+                        user_id=self.user_id,
+                        sender='agent',
+                        text=final_response,
+                        agent=self.agent_name
+                    )
+            else:
+                yield {
+                    "type": "error",
+                    "message": asset_result["message"],
+                    "status": "generation_failed"
+                }
+                
+        except Exception as e:
+            yield {
+                "type": "error",
+                "message": f"Asset generation failed: {str(e)}",
+                "status": "error"
+            }
+
+    async def stream_conversation_response(self, query: str) -> AsyncGenerator[Dict[str, Any], None]:
+        """Stream regular conversation responses"""
+        
+        try:
+            yield {
+                "type": "status",
+                "message": "💭 Preparing response...",
+                "status": "thinking"
+            }
+            
+            await asyncio.sleep(0.5)
+            
+            # Use the regular agent response
+            response = self.agent.run(query)
+            
+            # Stream the response word by word for effect
+            words = response.split()
+            current_text = ""
+            
+            for i, word in enumerate(words):
+                current_text += word + " "
+                
+                yield {
+                    "type": "message_chunk",
+                    "text": current_text.strip(),
+                    "is_complete": i == len(words) - 1,
+                    "status": "streaming"
+                }
+                
+                await asyncio.sleep(0.05)  # Small delay between words
+            
+            # Final complete message
+            yield {
+                "type": "message",
+                "text": response,
+                "status": "complete"
+            }
+            
+            # Save to MongoDB
+            if self.conversation_id and self.user_id:
+                MongoDB.save_message(
+                    conversation_id=self.conversation_id,
+                    user_id=self.user_id,
+                    sender='agent',
+                    text=response,
+                    agent=self.agent_name
+                )
+                
+        except Exception as e:
+            yield {
+                "type": "error",
+                "message": f"Response generation failed: {str(e)}",
+                "status": "error"
+            }
 
 def get_brand_designer_agent(user_id: str = None, conversation_id: str = None):
     return BrandDesignerAgent(user_id, conversation_id)
