@@ -13,6 +13,43 @@ messages_collection = db.messages
 
 class MongoDB:
     @staticmethod
+    def save_message_with_search_data(
+        conversation_id: str, 
+        user_id: str, 
+        sender: str, 
+        text: str, 
+        agent: str = None,
+        search_results: dict = None,
+        inspiration_images: list = None
+    ):
+        """Save a message with search results and inspiration images to MongoDB"""
+        message = {
+            "conversationId": ObjectId(conversation_id),
+            "userId": ObjectId(user_id),
+            "sender": sender,  # 'user' or 'agent'
+            "text": text,
+            "createdAt": datetime.utcnow(),
+            "updatedAt": datetime.utcnow()
+        }
+        
+        if agent and sender == 'agent':
+            message["agent"] = agent
+            
+        # ✅ ADD: Search results if provided
+        if search_results:
+            message["searchResults"] = search_results
+            print(f"[DEBUG] Saving search results: {len(search_results.get('results', []))} results")
+            
+        # ✅ ADD: Inspiration images if provided
+        if inspiration_images:
+            message["inspirationImages"] = inspiration_images
+            print(f"[DEBUG] Saving inspiration images: {len(inspiration_images)} images")
+            
+        result = messages_collection.insert_one(message)
+        print(f"[DEBUG] Message saved with search data. Message ID: {str(result.inserted_id)}")
+        return str(result.inserted_id)
+
+    @staticmethod
     def create_conversation(user_id: str, agent: str, title: str = None):
         """Create a new conversation"""
         conversation = {

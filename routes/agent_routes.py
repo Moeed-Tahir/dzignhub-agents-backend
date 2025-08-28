@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Query, HTTPException, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, validator
 from typing import Optional
 from agents.brand_designer import get_brand_designer_agent
 from core.database import MongoDB
@@ -21,6 +21,12 @@ class ChatRequest(BaseModel):
     prompt: str
     user_id: str
     conversation_id: Optional[str] = None
+
+    @validator('conversation_id', pre=True)
+    def normalize_conversation_id(cls, v):
+        if not v or v in ['', 'null', 'undefined', 'None']:
+            return None
+        return v
 
 class NewConversationRequest(BaseModel):
     user_id: str
@@ -358,20 +364,26 @@ async def brand_designer_stream_endpoint(request: ChatRequest):
         # Create conversation if not provided
         conversation_id = request.conversation_id
         is_new_conversation = False
-        
-        if not conversation_id:
+        print(conversation_id)
+        print(request.user_id)
+        if conversation_id is None:
             dynamic_title = generate_dynamic_title(request.prompt)
             conversation_id = MongoDB.create_conversation(
                 user_id=request.user_id,
                 agent="brand-designer", 
                 title=dynamic_title
             )
+            print("New conversation id: ", conversation_id)
             is_new_conversation = True
+
+        if not conversation_id:
+            raise Exception("Failed to create or retrieve conversation ID")
+
 
         # Get agent
         agent = get_brand_designer_agent(
             user_id=request.user_id,
-            conversation_id=conversation_id
+            conversation_id=str(conversation_id)
         )
         
         # Create streaming generator
@@ -387,7 +399,8 @@ async def brand_designer_stream_endpoint(request: ChatRequest):
                 yield f"data: {json.dumps(initial_data)}\n\n"
                 
                 # Stream the agent response
-                async for chunk in agent.handle_query_stream(request.prompt):
+                async for chunk in agent.stream_agent_response(request.prompt):
+                    print(f"[DEBUG] Streaming chunk: {chunk.get('type', 'unknown')}")
                     yield f"data: {json.dumps(chunk)}\n\n"
                 
                 # Send completion signal

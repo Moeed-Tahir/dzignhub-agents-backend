@@ -3,7 +3,7 @@ from openai import OpenAI
 from langchain_openai import ChatOpenAI
 from langchain.memory import ConversationBufferMemory
 from langchain.agents import initialize_agent, Tool, AgentType
-from core.config import OPENAI_API_KEY, PINECONE_API_KEY, PINECONE_ENV, GROQ_API_KEY
+from core.config import OPENAI_API_KEY, PINECONE_API_KEY, PINECONE_ENV, GROQ_API_KEY, SEARCHAPI_KEY
 from core.database import MongoDB
 from pinecone import Pinecone, ServerlessSpec
 from datetime import datetime
@@ -12,7 +12,7 @@ from typing import AsyncGenerator, Dict, Any
 from groq import Groq
 import re
 import json
-
+import requests
 # ---------------------------
 # Pinecone Setup (same as before)
 # ---------------------------
@@ -237,6 +237,8 @@ class BrandDesignerAgent:
         self.groq_client = groq_client
         self.reasoning_model = "deepseek-r1-distill-llama-70b"
         self.show_thinking = True  # Enable thinking display
+        self.searchapi_key = SEARCHAPI_KEY
+        self.search_base_url = "https://www.searchapi.io/api/v1/search"
         print(f"[DEBUG] Initialized with reasoning model: {self.reasoning_model}")
         
 
@@ -571,6 +573,112 @@ Always prioritize using the tool over giving generic advice."""
         except Exception as e:
             print(f"[DEBUG] Auto-completion error: {e}")
             return provided_info
+
+     # ✅ ADD: Search functionality methods
+    def search_with_keywords(self, keywords: str):
+        """Search web content using SearchAPI.io with better error handling"""
+        params = {
+            "engine": "google",
+            "q": keywords,
+            "api_key": self.searchapi_key,
+            "num": 8
+        }
+        try:
+            response = requests.get(self.search_base_url, params=params, timeout=10)
+            if response.status_code == 200:
+                return response.json()
+            else:
+                print(f"[DEBUG] Search API error: {response.status_code}")
+                return {"organic_results": []}
+        except Exception as e:
+            print(f"[DEBUG] Web search error: {e}")
+            return {"organic_results": []}
+
+    def convert_to_keywords(self, query: str) -> str:
+        """Convert user query to search keywords using GPT"""
+        try:
+            response = openai_client.chat.completions.create(
+                model="gpt-4",
+                messages=[
+                    {"role": "system", "content": "Convert the user query into a keyword optimized for search engine query to find inspirations/help/guidance for design. Return single keyword only."},
+                    {"role": "user", "content": f"User wants: {query}. Extract design-related search keyword."}
+                ],
+                temperature=0.1,
+                max_tokens=50
+            )
+            keywords = response.choices[0].message.content.strip()
+            print(f"[DEBUG] Generated search keywords: {keywords}")
+            return keywords
+        except Exception as e:
+            print(f"[DEBUG] Keyword generation error: {e}")
+            return query  # Fallback to original query
+
+    def search_images(self, query: str, num_results: int = 8):
+        """Search for design inspiration images from Behance and Dribbble"""
+        # First search Behance specifically
+        behance_query = f"site:behance.net {query}"
+        dribbble_query = f"site:dribbble.com {query}"
+        
+        all_images = []
+        
+        # Search Behance
+        try:
+            params = {
+                "engine": "google_images",
+                "q": behance_query,
+                "api_key": self.searchapi_key,
+                "num": num_results // 2
+            }
+            response = requests.get(self.search_base_url, params=params, timeout=10)
+            behance_data = response.json()
+            
+            for item in behance_data.get("images_results", []):
+                all_images.append({
+                    "title": item.get("title", "Behance Design"),
+                    "original": item.get("original"),
+                    "thumbnail": item.get("thumbnail"),
+                    "link": item.get("link"),
+                    "source": "Behance"
+                })
+        except Exception as e:
+            print(f"[DEBUG] Behance search error: {e}")
+
+        # Search Dribbble
+        try:
+            params = {
+                "engine": "google_images",
+                "q": dribbble_query,
+                "api_key": self.searchapi_key,
+                "num": num_results // 2
+            }
+            response = requests.get(self.search_base_url, params=params, timeout=10)
+            dribbble_data = response.json()
+            
+            for item in dribbble_data.get("images_results", []):
+                all_images.append({
+                    "title": item.get("title", "Dribbble Design"),
+                    "original": item.get("original"),
+                    "thumbnail": item.get("thumbnail"),
+                    "link": item.get("link"),
+                    "source": "Dribbble"
+                })
+        except Exception as e:
+            print(f"[DEBUG] Dribbble search error: {e}")
+
+        print(f"[DEBUG] Found {len(all_images)} design inspiration images")
+        return all_images
+
+    def format_search_results(self, results):
+        """Format web search results for display in frontend Sources Modal"""
+        articles = []
+        for item in results.get("organic_results", []):
+            articles.append({
+                "title": item.get("title"),
+                "link": item.get("link"), 
+                "source": item.get("source"),
+                "snippet": item.get("snippet")
+            })
+        return articles[:8]  # Increase to 8 results for better sources
 
 
     
@@ -1737,22 +1845,18 @@ Always prioritize using the tool over giving generic advice."""
 
     
     async def stream_asset_generation_with_real_thinking(self, query: str) -> AsyncGenerator[Dict[str, Any], None]:
-        """Stream asset generation with REAL model thinking using Groq reasoning models"""
-        
+        """Stream asset generation with REAL model thinking - TRUE SEQUENTIAL EXECUTION"""
         try:
             # ✅ STEP 1: REAL MODEL THINKING ABOUT THE REQUEST
             yield {
                 "type": "thinking_start",
-                "message": "🧠 Thinking....",
+                "message": "🧠 Let me think deeply about your request...",
                 "status": "thinking"
             }
             
-            await asyncio.sleep(0.3)
-            
-            # Get REAL model thinking using Groq reasoning model
+            # ✅ WAIT FOR ACTUAL THINKING TO COMPLETE (not hardcoded time)
             thinking_result = await self.get_real_model_thinking(query)
-
-            print("Model thinking: ", thinking_result)
+            print("Model thinking completed:", thinking_result)
             
             yield {
                 "type": "thinking_process",
@@ -1764,31 +1868,78 @@ Always prioritize using the tool over giving generic advice."""
                 "status": "thinking_complete"
             }
             
-            await asyncio.sleep(0.5)
-            
-            # ✅ STEP 2: REAL THINKING FOR INFORMATION EXTRACTION
+            # ✅ SMALL UI DELAY (optional, for UX)
+            await asyncio.sleep(0.3)  # Just for smooth UI transition
+
+            # ✅ STEP 2: WEB SEARCH - STARTS ONLY AFTER THINKING IS DONE
             yield {
                 "type": "tool_start",
-                "tool_name": "Brand Information Extractor",
-                "message": "🔍 Extracting brand information...",
-                "status": "extracting_info"
+                "tool_name": "Web Search Engine",
+                "message": "🔍 Searching for design inspiration and references...",
+                "status": "searching_web"
+            }
+            
+            # ✅ WAIT FOR ACTUAL SEARCH TO COMPLETE
+            search_keywords = self.convert_to_keywords(query)
+            search_results = self.search_with_keywords(search_keywords)
+            formatted_results = self.format_search_results(search_results)
+            
+            yield {
+                "type": "web_search_complete",
+                "tool_name": "Web Search Engine", 
+                "message": f"✅ Found {len(formatted_results)} relevant articles and references",
+                "data": {
+                    "keywords": search_keywords,  # ✅ Frontend expects this
+                    "results": formatted_results  # ✅ Frontend expects this
+                },
+                "status": "web_search_complete"
+                }
+            
+            # ✅ SMALL UI DELAY
+            await asyncio.sleep(0.3)
+            
+            # ✅ STEP 3: IMAGE SEARCH - STARTS ONLY AFTER WEB SEARCH IS DONE
+            yield {
+                "type": "tool_start",
+                "tool_name": "Design Inspiration Finder",
+                "message": "🎨 Searching Behance & Dribbble for design inspiration...",
+                "status": "searching_inspiration"
+            }
+            
+            # ✅ WAIT FOR ACTUAL IMAGE SEARCH TO COMPLETE
+            inspiration_images = self.search_images(f"{search_keywords} design inspiration", num_results=8)
+            
+            yield {
+                "type": "inspiration_images",
+                "tool_name": "Design Inspiration Finder",
+                "message": f"🎨 Found {len(inspiration_images)} design inspirations from Behance & Dribbble",
+                "images": inspiration_images,
+                "status": "inspiration_complete"
             }
             
             await asyncio.sleep(0.3)
             
-            # Show REAL extraction thinking
+            # ✅ STEP 4: BRAND EXTRACTION - STARTS ONLY AFTER INSPIRATION IS DONE
+            yield {
+                "type": "tool_start",
+                "tool_name": "Brand Information Extractor",
+                "message": "📋 Extracting brand information from your request...",
+                "status": "extracting_info"
+            }
+            
+            # ✅ WAIT FOR ACTUAL EXTRACTION THINKING TO COMPLETE
             extraction_thinking = await self.get_real_extraction_thinking(query)
             
             yield {
                 "type": "thinking_process",
-                "message": "🧠 Extraction Reasoning:",
+                "message": "🧠 Information Extraction Analysis:",
                 "thinking": extraction_thinking["thinking"],
                 "process": extraction_thinking["process"],
                 "findings": extraction_thinking["findings"],
                 "status": "extraction_thinking"
             }
             
-            # Perform extraction (using existing methods)
+            # ✅ PERFORM ACTUAL EXTRACTION (wait for completion)
             recent_messages = []
             if self.conversation_id and self.user_id:
                 recent_messages = MongoDB.get_conversation_messages(self.conversation_id, self.user_id)
@@ -1804,14 +1955,12 @@ Always prioritize using the tool over giving generic advice."""
             yield {
                 "type": "tool_result",
                 "tool_name": "Brand Information Extractor",
-                "message": f"✅ Extracted: {', '.join(extracted_info.keys())}",
+                "message": f"✅ Extracted: {', '.join(extracted_info.keys()) if extracted_info else 'Basic information'}",
                 "data": extracted_info,
                 "status": "info_extracted"
             }
             
-            await asyncio.sleep(0.3)
-            
-            # Check if we need more info
+            # Check if we need more info before continuing
             if not self.design_info.get("brand_name"):
                 yield {
                     "type": "message",
@@ -1820,60 +1969,69 @@ Always prioritize using the tool over giving generic advice."""
                 }
                 return
             
-            # ✅ STEP 3: AUTO-COMPLETION (using existing methods)
+            await asyncio.sleep(0.3)
+            
+            # ✅ STEP 5: AUTO-COMPLETION - STARTS ONLY AFTER EXTRACTION IS DONE
             missing_info = [k for k, v in self.design_info.items() if not v]
             
             if missing_info:
                 yield {
                     "type": "tool_start",
                     "tool_name": "Smart Auto-Completion",
-                    "message": "🧠 Smart-completing missing details...",
+                    "message": "🧠 Smart-completing missing brand details...",
                     "status": "auto_completing"
                 }
                 
-                await asyncio.sleep(0.3)
-                
+                # ✅ WAIT FOR ACTUAL AUTO-COMPLETION TO COMPLETE
                 auto_completed = self.intelligent_auto_complete(self.design_info.copy(), "logo")
                 for key, value in auto_completed.items():
                     if not self.design_info.get(key):
                         self.design_info[key] = value
                 
+                completed_fields = [k for k in missing_info if self.design_info.get(k)]
+                
                 yield {
                     "type": "tool_result",
-                    "tool_name": "Smart Auto-Completion",
-                    "message": f"✅ Completed: {', '.join(missing_info)}",
-                    "data": {k: v for k, v in self.design_info.items() if k in missing_info},
+                    "tool_name": "Smart Auto-Completion", 
+                    "message": f"✅ Completed: {', '.join(completed_fields) if completed_fields else 'Brand information'}",
+                    "data": {k: self.design_info[k] for k in completed_fields if self.design_info.get(k)},
                     "status": "auto_completed"
                 }
-                
-                await asyncio.sleep(0.3)
-            
-            # ✅ STEP 4: REAL DESIGN THINKING
-            yield {
-                "type": "tool_start",
-                "tool_name": "DALL-E 3 Asset Generator",
-                "message": "🎨 Designing your brand asset...",
-                "status": "generating_asset"
-            }
             
             await asyncio.sleep(0.3)
             
-            # Show REAL design thinking process
+            # ✅ STEP 6: DESIGN THINKING - STARTS ONLY AFTER AUTO-COMPLETION IS DONE
+            yield {
+                "type": "tool_start",
+                "tool_name": "Creative Design Process",
+                "message": "🎨 Analyzing design strategy and creative approach...",
+                "status": "design_thinking"
+            }
+            
+            # ✅ WAIT FOR ACTUAL DESIGN THINKING TO COMPLETE
             design_thinking = await self.get_real_design_thinking(self.design_info, query)
             
             yield {
                 "type": "thinking_process",
-                "message": "🎨 Creative Reasoning Process:",
+                "message": "🎨 Creative Design Strategy:",
                 "thinking": design_thinking["thinking"],
                 "creative_process": design_thinking["creative_process"],
                 "design_decisions": design_thinking["decisions"],
                 "prompt_strategy": design_thinking["prompt_strategy"],
-                "status": "design_thinking"
+                "status": "design_thinking_complete"
             }
             
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.3)
             
-            # Generate the asset (using existing method)
+            # ✅ STEP 7: ASSET GENERATION - STARTS ONLY AFTER DESIGN THINKING IS DONE
+            yield {
+                "type": "tool_start",
+                "tool_name": "DALL-E 3 Asset Generator",
+                "message": "✨ Generating your brand asset with DALL-E 3...",
+                "status": "generating_asset"
+            }
+            
+            # ✅ WAIT FOR ACTUAL ASSET GENERATION TO COMPLETE
             asset_result = self.generate_brand_asset_dalle(
                 self.design_info, 
                 "logo", 
@@ -1881,6 +2039,8 @@ Always prioritize using the tool over giving generic advice."""
                 user_context=query
             )
             
+            # At the end of your stream_asset_generation_with_real_thinking method:
+
             if asset_result["type"] == "asset_generated":
                 yield {
                     "type": "tool_result",
@@ -1888,7 +2048,7 @@ Always prioritize using the tool over giving generic advice."""
                     "message": "✅ Asset generated successfully!",
                     "status": "asset_generated"
                 }
-                
+
                 await asyncio.sleep(0.3)
                 
                 # Final response with asset
@@ -1902,6 +2062,17 @@ Always prioritize using the tool over giving generic advice."""
                     "status": "complete"
                 }
                 
+                # ✅ ADD: Send completion signal
+                yield {
+                "type": "complete",
+                "status": "complete",
+                "final_data": {
+                    "search_results": formatted_results,  # ✅ Include search results in completion
+                    "search_keywords": search_keywords,
+                    "inspiration_images": inspiration_images
+                    }
+                }
+                
                 # Save to MongoDB
                 if self.conversation_id and self.user_id:
                     final_response = f"""ASSET_GENERATED|{asset_result['image_url']}|{asset_result['message']}"""
@@ -1912,11 +2083,32 @@ Always prioritize using the tool over giving generic advice."""
                         text=final_response,
                         agent=self.agent_name
                     )
+                    search_results_data = {
+                        "keywords": search_keywords,
+                        "results": formatted_results
+                    } if formatted_results else None
+        
+                    # Save message with search data
+                    MongoDB.save_message_with_search_data(
+                        conversation_id=self.conversation_id,
+                        user_id=self.user_id,
+                        sender='agent',
+                        text=asset_result['message'],
+                        agent=self.agent_name,
+                        search_results=search_results_data,
+                        inspiration_images=inspiration_images
+                    )
             else:
                 yield {
                     "type": "error",
                     "message": asset_result["message"],
                     "status": "generation_failed"
+                }
+                
+                # ✅ ADD: Send completion signal even for errors
+                yield {
+                    "type": "complete",
+                    "status": "error"
                 }
                 
         except Exception as e:
@@ -1966,6 +2158,10 @@ Always prioritize using the tool over giving generic advice."""
                 "text": response,
                 "status": "complete"
             }
+            yield {
+            "type": "complete",
+            "status": "complete"
+            }
             
             # Save to MongoDB
             if self.conversation_id and self.user_id:
@@ -1982,6 +2178,10 @@ Always prioritize using the tool over giving generic advice."""
                 "type": "error",
                 "message": f"Response generation failed: {str(e)}",
                 "status": "error"
+            }
+            yield {
+            "type": "complete",
+            "status": "error"
             }
 
 
