@@ -1010,7 +1010,7 @@ Always prioritize using the tool over giving generic advice."""
         
          # COMPREHENSIVE QUESTIONS APPROACH - Ask everything at once
         if not self.design_info.get("brand_name"):
-            return self.ask_comprehensive_logo_questions(asset_type)
+            return self.ask_comprehensive_asset_questions(asset_type)
         
         # Save updated design_info
         self.save_brand_design()
@@ -1051,9 +1051,8 @@ Always prioritize using the tool over giving generic advice."""
         return self.collect_asset_info(asset_type, missing_info, provided_info)
 
 
-    def ask_comprehensive_logo_questions(self, asset_type: str) -> str:
+    def ask_comprehensive_asset_questions(self, asset_type: str) -> str:
         """Generate dynamic comprehensive questions using GPT based on asset type"""
-        
         asset_display = asset_type.replace('_', ' ')
         
         # Build dynamic prompt for comprehensive questions
@@ -1081,10 +1080,12 @@ Always prioritize using the tool over giving generic advice."""
         
         ASSET-SPECIFIC CONSIDERATIONS:
         - For logos: Ask about logo style (text-based, icon, combination)
-        - For social media: Ask about post purpose/message
-        - For LinkedIn covers: Ask about professional title/expertise
-        - For business cards: Ask about contact information needs
+        - For social media posts: Ask about post purpose/message/content
+        - For LinkedIn covers: Ask about professional title/expertise to highlight
+        - For business cards: Ask about contact information and role
         - For marketing materials: Ask about key message/call-to-action
+        - For Instagram posts: Ask about post type (announcement, product, quote, etc.)
+        - For posters: Ask about event/promotion details and key message
         
         Generate a natural, comprehensive question that covers all these points for a {asset_display}.
         """
@@ -1198,7 +1199,28 @@ Always prioritize using the tool over giving generic advice."""
             print(f"[DEBUG] Consultancy error: {e}")
             return "I'd be happy to help with brand consultancy! Could you provide more details about what specific aspect of branding you'd like advice on?"
         
-
+    def get_final_asset_type(self, query: str) -> str:
+        """Get the final asset type through multiple detection methods"""
+        
+        # Method 1: Check if already detected from conversation
+        conversation_type = getattr(self, 'detected_asset_type', None)
+        if conversation_type and conversation_type != 'logo':
+            print(f"[DEBUG] Using conversation detected type: {conversation_type}")
+            return conversation_type
+        
+        # Method 2: Extract from current input
+        self.extract_from_current_input(query)
+        current_type = getattr(self, 'detected_asset_type', None)
+        if current_type and current_type != 'logo':
+            print(f"[DEBUG] Using current input detected type: {current_type}")
+            return current_type
+        
+        # Method 3: Use GPT detection as fallback
+        asset_info = self.detect_asset_type_and_specs(query)
+        final_type = asset_info.get("type", "logo")
+        print(f"[DEBUG] Using GPT detected type: {final_type}")
+        
+        return final_type
 
     def detect_asset_type_and_specs(self, user_input: str) -> dict:
         """Use GPT to intelligently detect asset type and specifications"""
@@ -1232,7 +1254,7 @@ Always prioritize using the tool over giving generic advice."""
         - poster: 1080x1350 (brand marketing materials)
         - consultancy: N/A (advice/recommendations only)
         
-        Return JSON with detected type:
+        Return only JSON with detected type, don't give any text other than JSON:
         Format: """ + '{"type": "consultancy/logo/instagram_post/etc", "dimensions": "width_x_height or N/A", "confidence": "high/medium/low", "reasoning": "brief explanation"}'
         
         try:
@@ -1962,14 +1984,18 @@ Always prioritize using the tool over giving generic advice."""
             
             # Check if we need more info before continuing
             if not self.design_info.get("brand_name"):
+                asset_type = self.get_final_asset_type(query)
+
+                comprehensive_questions = self.ask_comprehensive_asset_questions(asset_type)
                 yield {
                     "type": "message",
-                    "message": self.ask_comprehensive_logo_questions("logo"),
+                    "message": comprehensive_questions,
                     "status": "awaiting_input"
                 }
                 yield {
                 "type": "complete",
                 "status": "awaiting_input",
+                "message": comprehensive_questions,
                 "final_data": {
                     "search_results": formatted_results,
                     "search_keywords": search_keywords,
