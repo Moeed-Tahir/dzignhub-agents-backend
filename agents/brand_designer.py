@@ -1967,6 +1967,15 @@ Always prioritize using the tool over giving generic advice."""
                     "message": self.ask_comprehensive_logo_questions("logo"),
                     "status": "awaiting_input"
                 }
+                yield {
+                "type": "complete",
+                "status": "awaiting_input",
+                "final_data": {
+                    "search_results": formatted_results,
+                    "search_keywords": search_keywords,
+                    "inspiration_images": inspiration_images
+                }
+            }
                 return
             
             await asyncio.sleep(0.3)
