@@ -615,57 +615,134 @@ Always prioritize using the tool over giving generic advice."""
 
     def search_images(self, query: str, num_results: int = 8):
         """Search for design inspiration images from Behance and Dribbble"""
-        # First search Behance specifically
+        print(f"[DEBUG] Starting image search for: '{query}' with {num_results} results")
+        
+        # Search queries for each platform
         behance_query = f"site:behance.net {query}"
         dribbble_query = f"site:dribbble.com {query}"
         
+        print(f"[DEBUG] Behance query: {behance_query}")
+        print(f"[DEBUG] Dribbble query: {dribbble_query}")
+        
         all_images = []
         
-        # Search Behance
+        # Search Behance - Get exactly 5 images
         try:
             params = {
                 "engine": "google_images",
                 "q": behance_query,
                 "api_key": self.searchapi_key,
-                "num": num_results // 2
+                "num": 5  # ✅ Request exactly 5 images
             }
-            response = requests.get(self.search_base_url, params=params, timeout=10)
-            behance_data = response.json()
             
-            for item in behance_data.get("images_results", []):
-                all_images.append({
-                    "title": item.get("title", "Behance Design"),
-                    "original": item.get("original"),
-                    "thumbnail": item.get("thumbnail"),
-                    "link": item.get("link"),
-                    "source": "Behance"
-                })
+            
+            
+            response = requests.get(self.search_base_url, params=params, timeout=10)
+            
+            
+            
+            if response.status_code == 200:
+                behance_data = response.json()
+                print(f"[DEBUG] Behance response keys: {behance_data.keys()}")
+                
+                # ✅ Get images from correct field
+                images_list = behance_data.get("images", [])
+                print(f"[DEBUG] Behance total images available: {len(images_list)}")
+                
+                # ✅ Process exactly 5 images from Behance
+                for i, item in enumerate(images_list[:5]):  # Take only first 5
+                    print(f"[DEBUG] Processing Behance image {i+1}: {item.get('title', 'No title')[:50]}...")
+                    
+                    # ✅ Extract image data with correct structure
+                    original_data = item.get("original", {})
+                    source_data = item.get("source", {})
+                    
+                    image_data = {
+                        "title": item.get("title", "Behance Design")[:100],  # Limit title length
+                        "original": original_data.get("link") if isinstance(original_data, dict) else original_data,
+                        "thumbnail": item.get("thumbnail"),
+                        "link": source_data.get("link") if isinstance(source_data, dict) else None,
+                        "source": "Behance",
+                        "position": item.get("position", i+1)
+                    }
+                    
+                    # ✅ Only add if we have valid image URLs
+                    if image_data["original"] and image_data["thumbnail"]:
+                        all_images.append(image_data)
+                        print(f"[DEBUG] ✅ Added Behance image {len(all_images)}")
+                    else:
+                        print(f"[DEBUG] ❌ Skipped Behance image {i+1} - missing URLs")
+                        
+            else:
+                print(f"[DEBUG] Behance API error: {response.status_code}")
+                print(f"[DEBUG] Behance error response: {response.text}")
+                
         except Exception as e:
             print(f"[DEBUG] Behance search error: {e}")
+            import traceback
+            print(f"[DEBUG] Behance traceback: {traceback.format_exc()}")
 
-        # Search Dribbble
+        # Search Dribbble - Get exactly 5 images
         try:
             params = {
-                "engine": "google_images",
+                "engine": "google_images", 
                 "q": dribbble_query,
                 "api_key": self.searchapi_key,
-                "num": num_results // 2
+                "num": 5  # ✅ Request exactly 5 images
             }
-            response = requests.get(self.search_base_url, params=params, timeout=10)
-            dribbble_data = response.json()
             
-            for item in dribbble_data.get("images_results", []):
-                all_images.append({
-                    "title": item.get("title", "Dribbble Design"),
-                    "original": item.get("original"),
-                    "thumbnail": item.get("thumbnail"),
-                    "link": item.get("link"),
-                    "source": "Dribbble"
-                })
+            print(f"[DEBUG] Dribbble request params: {params}")
+            
+            response = requests.get(self.search_base_url, params=params, timeout=10)
+            
+            print(f"[DEBUG] Dribbble response status: {response.status_code}")
+            
+            if response.status_code == 200:
+                dribbble_data = response.json()
+                print(f"[DEBUG] Dribbble response keys: {dribbble_data.keys()}")
+                
+                # ✅ Get images from correct field
+                images_list = dribbble_data.get("images", [])
+                print(f"[DEBUG] Dribbble total images available: {len(images_list)}")
+                
+                # ✅ Process exactly 5 images from Dribbble
+                for i, item in enumerate(images_list[:5]):  # Take only first 5
+                    print(f"[DEBUG] Processing Dribbble image {i+1}: {item.get('title', 'No title')[:50]}...")
+                    
+                    # ✅ Extract image data with correct structure
+                    original_data = item.get("original", {})
+                    source_data = item.get("source", {})
+                    
+                    image_data = {
+                        "title": item.get("title", "Dribbble Design")[:100],  # Limit title length
+                        "original": original_data.get("link") if isinstance(original_data, dict) else original_data,
+                        "thumbnail": item.get("thumbnail"),
+                        "link": source_data.get("link") if isinstance(source_data, dict) else None,
+                        "source": "Dribbble",
+                        "position": item.get("position", i+1)
+                    }
+                    
+                    # ✅ Only add if we have valid image URLs
+                    if image_data["original"] and image_data["thumbnail"]:
+                        all_images.append(image_data)
+                        print(f"[DEBUG] ✅ Added Dribbble image {len(all_images)}")
+                    else:
+                        print(f"[DEBUG] ❌ Skipped Dribbble image {i+1} - missing URLs")
+                        
+            else:
+                print(f"[DEBUG] Dribbble API error: {response.status_code}")
+                print(f"[DEBUG] Dribbble error response: {response.text}")
+                
         except Exception as e:
             print(f"[DEBUG] Dribbble search error: {e}")
+            import traceback
+            print(f"[DEBUG] Dribbble traceback: {traceback.format_exc()}")
 
-        print(f"[DEBUG] Found {len(all_images)} design inspiration images")
+        print(f"[DEBUG] Final result: {len(all_images)} design inspiration images collected")
+        print(f"[DEBUG] Images breakdown:")
+        for i, img in enumerate(all_images):
+            print(f"[DEBUG] {i+1}. {img['source']}: {img['title'][:50]}...")
+        
         return all_images
 
     def format_search_results(self, results):
