@@ -1401,9 +1401,10 @@ Always prioritize using the tool over giving generic advice."""
                 "reasoning": "default consultancy fallback"
             }
 
+    
 
     def generate_brand_asset_dalle(self, info: dict, asset_type: str, dimensions: str, user_context: str = ""):
-        """Generate various brand assets with DALL-E using dynamic prompts that incorporate user context"""
+        """Enhanced brand asset generation with dynamic messaging"""
         
         brand_name = info.get('brand_name', 'Brand')
         target_audience = info.get('target_audience', 'general audience')
@@ -1411,125 +1412,273 @@ Always prioritize using the tool over giving generic advice."""
         brand_personality = info.get('brand_personality', 'professional')
         industry = info.get('industry', 'general business')
         logo_type = info.get('logo_type', 'modern')
-        
-        # Build dynamic prompt based on user context and asset type
-        def build_dynamic_prompt(base_style: str, user_context: str) -> str:
-            """Build a dynamic prompt that incorporates user's specific context"""
+
+        def generate_dynamic_asset_success_message(
+    brand_name: str, 
+    asset_type: str, 
+    brand_personality: str,
+    target_audience: str, 
+    color_palette: str, 
+    user_context: str = "",
+    industry: str = "business"
+) -> str:
+            """Generate dynamic, conversational success messages using GPT for any asset type"""
             
-            # Base prompt structure
-            base_prompt = f"Create a {base_style} for '{brand_name}'"
+            # Asset display names
+            asset_displays = {
+                "logo": "logo",
+                "instagram_post": "Instagram post",
+                "instagram_story": "Instagram story",
+                "linkedin_cover": "LinkedIn cover", 
+                "facebook_cover": "Facebook cover",
+                "youtube_thumbnail": "YouTube thumbnail",
+                "twitter_header": "Twitter header",
+                "poster": "poster",
+                "business_card": "business card",
+                "brochure": "brochure",
+                "letterhead": "letterhead",
+                "web_banner": "website banner",
+                "email_signature": "email signature",
+                "flyer": "flyer",
+                "thumbnail": "thumbnail"
+            }
             
-            # Add specific context if provided
-            context_section = ""
+            asset_display = asset_displays.get(asset_type, asset_type.replace('_', ' '))
+            
+            # Asset-specific conversation starters and benefits
+            asset_specific_info = {
+                "logo": {
+                    "benefits": ["versatile for all brand materials", "scalable for any size", "memorable brand identity"],
+                    "next_steps": ["create matching business cards", "design social media profile pictures", "develop a complete brand package", "generate marketing materials"]
+                },
+                "instagram_post": {
+                    "benefits": ["optimized for high engagement", "mobile-friendly design", "algorithm-favored format"],
+                    "next_steps": ["create matching Instagram stories", "design a content series", "generate Facebook versions", "create LinkedIn adaptations"]
+                },
+                "linkedin_cover": {
+                    "benefits": ["professional credibility boost", "networking advantage", "career-focused design"],
+                    "next_steps": ["create matching business cards", "design email signatures", "generate presentation templates", "create professional social posts"]
+                },
+                "youtube_thumbnail": {
+                    "benefits": ["maximized click-through potential", "search visibility optimized", "viewer attraction focused"],
+                    "next_steps": ["create thumbnail series", "design channel art", "generate video promotional posts", "create Instagram story versions"]
+                },
+                "business_card": {
+                    "benefits": ["professional networking tool", "brand consistency", "print-ready quality"],
+                    "next_steps": ["design matching letterheads", "create email signatures", "generate business stationery", "develop brand templates"]
+                },
+                "poster": {
+                    "benefits": ["high visual impact", "versatile marketing tool", "attention-grabbing design"],
+                    "next_steps": ["create social media versions", "design smaller flyer formats", "generate digital adaptations", "create event promotions"]
+                }
+            }
+            
+            # Default fallback info
+            default_info = {
+                "benefits": ["professional brand representation", "high-quality design", "purpose-optimized format"],
+                "next_steps": ["create variations", "design matching materials", "generate complementary assets", "develop brand consistency"]
+            }
+            
+            asset_info = asset_specific_info.get(asset_type, default_info)
+            
+            # Context integration
+            context_mention = ""
             if user_context and user_context.strip():
-                # Extract key context elements
-                context_prompt = f"""
-                Analyze this user context and extract key visual elements that should be included in the design:
-                "{user_context}"
+                context_mention = f"perfectly incorporating your specific requirements about {user_context[:50]}{'...' if len(user_context) > 50 else ''}"
+            
+            # GPT-powered dynamic message generation
+            message_prompt = f"""
+            Generate an enthusiastic, conversational success message for a {asset_display} that was just created.
+            
+            ASSET DETAILS:
+            - Brand: {brand_name}
+            - Asset Type: {asset_display}
+            - Brand Personality: {brand_personality}
+            - Target Audience: {target_audience}
+            - Colors: {color_palette}
+            - Industry: {industry}
+            - User Context: {user_context if user_context else 'None'}
+            
+            KEY BENEFITS TO MENTION (pick 2-3):
+            {', '.join(asset_info['benefits'])}
+            
+            CONVERSATION STARTERS (pick 2-3):
+            {', '.join(asset_info['next_steps'])}
+            
+            REQUIREMENTS:
+            1. Start with genuine excitement about the completed {asset_display}
+            2. Mention 2-3 specific benefits or design elements that work well
+            3. Reference the context if provided: {context_mention if context_mention else 'N/A'}
+            4. Ask 2-3 engaging follow-up questions or suggest next steps
+            5. Use emojis strategically (not overuse)
+            6. Be conversational like ChatGPT - natural, not robotic
+            7. Keep it 3-4 sentences with natural flow
+            8. Include specific asset type benefits
+            
+            TONE: Enthusiastic designer who just completed an amazing project and is excited to show it off and discuss next steps.
+            
+            Generate a unique, natural response that doesn't sound templated.
+            """
+            
+            try:
+                response = openai_client.chat.completions.create(
+                    model="gpt-4",
+                    messages=[
+                        {"role": "system", "content": f"Generate enthusiastic, natural success messages for {asset_display} completions. Be conversational like ChatGPT, not robotic. Show genuine excitement about the design work."},
+                        {"role": "user", "content": message_prompt}
+                    ],
+                    temperature=0.8,  # Higher temperature for natural variation
+                    max_tokens=400
+                )
                 
-                Return 2-3 specific visual elements or messages that should be prominently featured in the design.
-                Format: "Element 1, Element 2, Element 3"
+                dynamic_message = response.choices[0].message.content.strip()
+                print(f"[DEBUG] Generated dynamic success message for {asset_type}: {dynamic_message[:100]}...")
                 
-                Examples:
-                - "500 followers milestone" → "500 followers celebration, milestone achievement, social media success"
-                - "new product launch" → "new product showcase, launch announcement, excitement"
-                - "hiring designers" → "hiring call, designer wanted, join our team"
-                """
+                return dynamic_message
                 
+            except Exception as e:
+                print(f"[DEBUG] Dynamic message generation error: {e}")
+                
+                # Smart fallback with asset-specific templates
+                fallback_templates = {
+                    "logo": [
+                        f"🎉 **Your {brand_name} logo is ready!** I love how the {brand_personality} design captures your brand essence for {target_audience}. The {color_palette} creates exactly the professional impact you need. Want to see this on business cards or create social media versions? 🎨",
+                        
+                        f"✨ **{brand_name} logo complete!** This {brand_personality} approach really works for {target_audience} - it's versatile, memorable, and perfectly branded. Should we create matching materials or explore some color variations? What's your next priority? 🚀"
+                    ],
+                    
+                    "instagram_post": [
+                        f"🎉 **Your {brand_name} Instagram post is ready!** This {brand_personality} design{' ' + context_mention if context_mention else ''} will definitely stand out in feeds. The {color_palette} really pops on mobile! Want to create matching stories or design a whole content series? 📱✨",
+                        
+                        f"✨ **Instagram post complete for {brand_name}!** Love how this captures your {brand_personality} vibe for {target_audience}. It's perfectly optimized for engagement. Should we create more posts in this style or adapt it for other platforms? 🚀"
+                    ],
+                    
+                    "linkedin_cover": [
+                        f"🎉 **Your {brand_name} LinkedIn cover is complete!** This {brand_personality} design will make your profile incredibly professional and memorable for {target_audience}. The {color_palette} builds perfect trust and credibility. Want matching business cards or email signatures? 💼✨",
+                        
+                        f"✨ **LinkedIn cover ready for {brand_name}!** The {brand_personality} approach perfectly represents your professional brand. This will definitely make you stand out to {target_audience}. Should we create presentation templates or other professional materials? 🚀"
+                    ]
+                }
+                
+                if asset_type in fallback_templates:
+                    import random
+                    return random.choice(fallback_templates[asset_type])
+                
+                # Generic fallback
+                return f"🎨 **Your {brand_name} {asset_display} is ready!** I've created a {brand_personality} design{' ' + context_mention if context_mention else ''} that perfectly captures your brand for {target_audience}. The {color_palette} creates exactly the right impact! Want to create variations or matching brand materials? ✨"
+
+        
+        # ✅ ENHANCED ASSET PROMPTS - More sophisticated and context-aware
+        def build_enhanced_prompt(asset_type: str, user_context: str) -> str:
+            """Build sophisticated prompts for different asset types"""
+            
+            # Context extraction for better prompts
+            context_elements = ""
+            if user_context and user_context.strip():
                 try:
+                    context_prompt = f"""
+                    Extract specific visual elements from this context for design: "{user_context}"
+                    Return 2-3 specific elements that should be featured prominently.
+                    Format: "element1, element2, element3"
+                    """
+                    
                     response = openai_client.chat.completions.create(
                         model="gpt-4",
                         messages=[
-                            {"role": "system", "content": "Extract specific visual elements from user context for design purposes. Be concise and specific."},
+                            {"role": "system", "content": "Extract specific visual design elements from user context."},
                             {"role": "user", "content": context_prompt}
                         ],
                         temperature=0.3,
                         max_tokens=100
                     )
                     
-                    extracted_elements = response.choices[0].message.content.strip()
-                    context_section = f" featuring {extracted_elements}"
-                    print(f"[DEBUG] Extracted context elements: {extracted_elements}")
+                    extracted = response.choices[0].message.content.strip()
+                    context_elements = f" featuring {extracted}"
                     
                 except Exception as e:
-                    print(f"[DEBUG] Context extraction error: {e}")
-                    # Fallback: use original context
-                    context_section = f" about {user_context}"
+                    context_elements = f" about {user_context}"
             
-            # Asset-specific styling
-            style_guidelines = {
-                "logo": f"Professional logo design. Style: {logo_type}. Clean, scalable, memorable design.",
-                "instagram_post": f"Instagram post design with square format optimized for mobile. Eye-catching, social media friendly design with clear visual hierarchy.",
-                "instagram_story": f"Instagram story graphic with vertical mobile format. Engaging, thumb-stopping design optimized for stories.",
-                "linkedin_cover": f"LinkedIn profile cover banner with professional business format. Corporate-appropriate design.",
-                "facebook_cover": f"Facebook cover photo with social media banner format. Engaging, social-friendly design.",
-                "youtube_thumbnail": f"YouTube thumbnail with high click-through appeal. Bold, attention-grabbing design.",
-                "twitter_header": f"Twitter header banner with clean, professional social media design.",
-                "poster": f"Promotional poster with clear message hierarchy. Eye-catching, informative design.",
-                "brochure": f"Business brochure with information layout. Professional, organized design.",
-                "business_card": f"Professional business card with contact card layout. Clean, readable, professional design.",
-                "letterhead": f"Company letterhead with business stationery branding. Professional, corporate design.",
-                "web_banner": f"Website banner or hero image. Modern, web-optimized design.",
-                "email_signature": f"Email signature banner with professional footer design. Clean, minimal, professional design."
+            # Enhanced prompts for each asset type
+            prompts = {
+                "logo": f"Create a professional {logo_type} logo design for '{brand_name}'{context_elements}. Clean, scalable, memorable business branding. Vector-style design optimized for multiple sizes.",
+                
+                "instagram_post": f"Design an engaging Instagram post for '{brand_name}'{context_elements}. Square format (1080x1080), mobile-optimized, high engagement potential with clear visual hierarchy and thumb-stopping appeal.",
+                
+                "instagram_story": f"Create a vertical Instagram story for '{brand_name}'{context_elements}. Mobile-first design (1080x1920), story-optimized with engaging visual elements and clear messaging.",
+                
+                "linkedin_cover": f"Design a professional LinkedIn cover banner for '{brand_name}'{context_elements}. Corporate header format (1584x396), business networking optimized, professional credibility focus.",
+                
+                "facebook_cover": f"Create a Facebook cover photo for '{brand_name}'{context_elements}. Social banner format (1200x630), community-focused design with brand personality.",
+                
+                "youtube_thumbnail": f"Design a high-CTR YouTube thumbnail for '{brand_name}'{context_elements}. Bold, attention-grabbing format (1280x720) optimized for search visibility and click-through rates.",
+                
+                "twitter_header": f"Create a Twitter header banner for '{brand_name}'{context_elements}. Clean social header (1500x500), brand-focused design optimized for Twitter platform.",
+                
+                "poster": f"Design a promotional poster for '{brand_name}'{context_elements}. Marketing poster format with clear hierarchy, eye-catching design for promotional use.",
+                
+                "business_card": f"Create a professional business card for '{brand_name}'{context_elements}. Standard card format (1050x600), print-ready design with clear contact hierarchy.",
+                
+                "brochure": f"Design a business brochure for '{brand_name}'{context_elements}. Information layout, professional design for business materials and marketing.",
+                
+                "letterhead": f"Create company letterhead for '{brand_name}'{context_elements}. Business stationery format, corporate branding design for official communications.",
+                
+                "web_banner": f"Design a website banner for '{brand_name}'{context_elements}. Modern web format, hero image design optimized for digital platforms.",
+                
+                "email_signature": f"Create an email signature banner for '{brand_name}'{context_elements}. Professional footer design, clean and minimal for email communications.",
+                
+                "flyer": f"Design a marketing flyer for '{brand_name}'{context_elements}. Event/promotion format, attention-grabbing design for marketing distribution.",
+                
+                "thumbnail": f"Create a content thumbnail for '{brand_name}'{context_elements}. High-engagement format, optimized for content platforms and social sharing."
             }
             
-            style_guide = style_guidelines.get(asset_type, style_guidelines["logo"])
+            base_prompt = prompts.get(asset_type, prompts["logo"])
             
-            # Build complete prompt
-            full_prompt = f"{base_prompt}{context_section}. {style_guide} Target audience: {target_audience}. Colors: {color_palette}. Brand personality: {brand_personality}."
+            # Add brand context
+            complete_prompt = f"""{base_prompt}
             
-            # Add platform-specific optimizations
-            platform_optimizations = {
-                "instagram_post": " Include engaging visual elements that perform well on Instagram feeds.",
-                "instagram_story": " Design should be mobile-first and story-friendly.",
-                "linkedin_cover": " Professional and business-appropriate for LinkedIn platform.",
-                "youtube_thumbnail": " Bold text and high contrast elements for thumbnail visibility.",
-                "business_card": " Print-ready design with clear contact information hierarchy."
-            }
-            
-            if asset_type in platform_optimizations:
-                full_prompt += platform_optimizations[asset_type]
-            
-            return full_prompt
+    Brand Context:
+    - Target Audience: {target_audience}
+    - Brand Personality: {brand_personality} 
+    - Industry: {industry}
+    - Color Palette: {color_palette}
+    - Style Direction: {logo_type}
+
+    Design Requirements:
+    - High quality, professional execution
+    - Platform-optimized for {asset_type.replace('_', ' ')}
+    - Brand-consistent visual identity
+    - No text overlays unless specifically requested
+    - Optimized for intended use case"""
+
+            return complete_prompt
         
-        # Generate dynamic prompt
-        asset_names = {
-            "logo": "professional logo design",
-            "instagram_post": "Instagram post design",
-            "instagram_story": "Instagram story graphic",
-            "linkedin_cover": "LinkedIn profile cover banner",
-            "facebook_cover": "Facebook cover photo",
-            "youtube_thumbnail": "YouTube thumbnail design",
-            "twitter_header": "Twitter header banner",
-            "poster": "promotional poster design",
-            "brochure": "business brochure design",
-            "business_card": "professional business card",
-            "letterhead": "company letterhead design",
-            "web_banner": "website banner design",
-            "email_signature": "email signature banner"
-        }
+        # Build the enhanced prompt
+        prompt = build_enhanced_prompt(asset_type, user_context)
         
-        base_style = asset_names.get(asset_type, "professional design")
-        prompt = build_dynamic_prompt(base_style, user_context)
-        
-        # Parse dimensions for DALL-E
-        dalle_size = "1024x1024"  # Default
+        # Parse dimensions for DALL-E (existing logic)
+        dalle_size = "1024x1024"
         if dimensions in ["1024x1024", "1792x1024", "1024x1792"]:
             dalle_size = dimensions
         elif "x" in dimensions:
-            width, height = map(int, dimensions.split("x"))
-            if width > height:
-                dalle_size = "1792x1024"
-            elif height > width:
-                dalle_size = "1024x1792"
-            else:
+            try:
+                width, height = map(int, dimensions.split("x"))
+                if width > height:
+                    dalle_size = "1792x1024"
+                elif height > width:
+                    dalle_size = "1024x1792"
+                else:
+                    dalle_size = "1024x1024"
+            except:
                 dalle_size = "1024x1024"
         
         try:
-            print(f"[DEBUG] Generating {asset_type} with DALL-E...")
-            print(f"[DEBUG] Requested dimensions: {dimensions}, Using DALL-E size: {dalle_size}")
-            print(f"[DEBUG] Dynamic Prompt: {prompt}")
+            print(f"[DEBUG] Generating {asset_type} with enhanced prompts...")
+            print(f"[DEBUG] Brand: {brand_name}")
+            print(f"[DEBUG] Asset Type: {asset_type}")
+            print(f"[DEBUG] Dimensions: {dimensions} -> DALL-E: {dalle_size}")
+            print(f"[DEBUG] Enhanced Prompt: {prompt[:200]}...")
             
+            # Generate with DALL-E 3
             result = openai_client.images.generate(
                 model="dall-e-3",
                 prompt=prompt,
@@ -1540,49 +1689,21 @@ Always prioritize using the tool over giving generic advice."""
             
             image_url = result.data[0].url
             print(f"[DEBUG] Successfully generated {asset_type}!")
-            print(f"[DEBUG] Image URL: {image_url}")
             
-            # Create success message
-            asset_display_names = {
-                "logo": "logo",
-                "instagram_post": "Instagram post",
-                "instagram_story": "Instagram story", 
-                "linkedin_cover": "LinkedIn cover",
-                "facebook_cover": "Facebook cover",
-                "youtube_thumbnail": "YouTube thumbnail",
-                "twitter_header": "Twitter header",
-                "poster": "poster",
-                "brochure": "brochure", 
-                "business_card": "business card",
-                "letterhead": "letterhead",
-                "web_banner": "website banner",
-                "email_signature": "email signature"
-            }
-            
-            asset_display_name = asset_display_names.get(asset_type, "design")
-            
-            # Include user context in success message if provided
-            context_message = ""
-            if user_context and user_context.strip():
-                context_message = f" incorporating your specific requirements"
-            
-            success_message = f"🎨 **Your {brand_name} {asset_display_name} is ready!**\n\nI've created a {brand_personality} design{context_message} that perfectly captures your brand identity for {target_audience}. The design uses {color_palette} to create a memorable look."
-            
-            # Add platform-specific tips
-            platform_tips = {
-                "instagram_post": "\n\n💡 **Tip**: Perfect for Instagram feed posts and can be used on other social platforms too!",
-                "instagram_story": "\n\n💡 **Tip**: Optimized for Instagram Stories - great for engagement and brand awareness!",
-                "linkedin_cover": "\n\n💡 **Tip**: This will make your LinkedIn profile stand out professionally!",
-                "youtube_thumbnail": "\n\n💡 **Tip**: Designed to maximize click-through rates on YouTube!",
-                "business_card": "\n\n💡 **Tip**: Print at 300 DPI for best quality results!",
-            }
-            
-            if asset_type in platform_tips:
-                success_message += platform_tips[asset_type]
+            # ✅ USE DYNAMIC SUCCESS MESSAGE FUNCTION
+            dynamic_message = generate_dynamic_asset_success_message(
+                brand_name=brand_name,
+                asset_type=asset_type,
+                brand_personality=brand_personality,
+                target_audience=target_audience,
+                color_palette=color_palette,
+                user_context=user_context,
+                industry=industry
+            )
             
             return {
-                "type": "asset_generated",
-                "message": success_message,
+                "type": "asset_generated", 
+                "message": dynamic_message,
                 "image_url": image_url,
                 "asset_type": asset_type,
                 "dimensions": dimensions,
@@ -1590,13 +1711,14 @@ Always prioritize using the tool over giving generic advice."""
             }
             
         except Exception as e:
-            print(f"[DEBUG] DALL-E generation error: {str(e)}")
+            print(f"[DEBUG] Enhanced generation error: {str(e)}")
             return {
                 "type": "error",
-                "message": f"I encountered an issue generating your {asset_type.replace('_', ' ')}: {str(e)}. Let me try again with different specifications.",
+                "message": f"I encountered an issue generating your {asset_type.replace('_', ' ')}: {str(e)}. Let me try a different approach.",
                 "image_url": None,
                 "brand_info": info
             }
+        
     
 
     def collect_asset_info(self, asset_type: str, missing_info: list, provided_info: dict) -> str:
