@@ -1869,10 +1869,29 @@ Always prioritize using the tool over giving generic advice."""
     async def stream_asset_generation_with_real_thinking(self, query: str) -> AsyncGenerator[Dict[str, Any], None]:
         """Stream asset generation with REAL model thinking - TRUE SEQUENTIAL EXECUTION"""
         try:
+            if self.conversation_id and self.user_id:
+                MongoDB.save_message(
+                    conversation_id=self.conversation_id,
+                    user_id=self.user_id,
+                    sender='user',
+                    text=query
+                )
+                print(f"[DEBUG] User message saved to MongoDB: {query}")
+        
+        # ✅ Store user query in Pinecone
+            store_in_pinecone(
+                agent_type="brand-designer", 
+                role="user", 
+                text=query,
+                user_id=self.user_id,
+                conversation_id=self.conversation_id
+            )
+            print(f"[DEBUG] User message stored in Pinecone")
+        
             # ✅ STEP 1: REAL MODEL THINKING ABOUT THE REQUEST
             yield {
                 "type": "thinking_start",
-                "message": "🧠 Let me think deeply about your request...",
+                "message": "🧠 Thinking...",
                 "status": "thinking"
             }
             
@@ -2118,6 +2137,14 @@ Always prioritize using the tool over giving generic advice."""
                         text=final_response,
                         agent=self.agent_name
                     )
+
+                    store_in_pinecone(
+                    agent_type="brand-designer", 
+                    role="agent", 
+                    text=final_response,
+                    user_id=self.user_id,
+                    conversation_id=self.conversation_id
+                    )
                     search_results_data = {
                         "keywords": search_keywords,
                         "results": formatted_results
@@ -2132,6 +2159,13 @@ Always prioritize using the tool over giving generic advice."""
                         agent=self.agent_name,
                         search_results=search_results_data,
                         inspiration_images=inspiration_images
+                    )
+                    store_in_pinecone(
+                    agent_type="brand-designer", 
+                    role="agent", 
+                    text=asset_result['message'],
+                    user_id=self.user_id,
+                    conversation_id=self.conversation_id
                     )
             else:
                 yield {
