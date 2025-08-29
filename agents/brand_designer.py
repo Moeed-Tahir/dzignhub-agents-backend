@@ -2393,6 +2393,24 @@ Always prioritize using the tool over giving generic advice."""
         """Stream regular conversation responses"""
         
         try:
+            if self.conversation_id and self.user_id:
+                MongoDB.save_message(
+                    conversation_id=self.conversation_id,
+                    user_id=self.user_id,
+                    sender='user',
+                    text=query
+                )
+                print(f"[DEBUG] User message saved to MongoDB: {query}")
+        
+        # ✅ Store user query in Pinecone
+            store_in_pinecone(
+                agent_type="brand-designer", 
+                role="user", 
+                text=query,
+                user_id=self.user_id,
+                conversation_id=self.conversation_id
+            )
+            print(f"[DEBUG] User message stored in Pinecone")
             yield {
                 "type": "status",
                 "message": "💭 Preparing response...",
