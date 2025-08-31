@@ -1488,8 +1488,8 @@ Always prioritize using the tool over giving generic advice."""
             
             # GPT-powered dynamic message generation
             message_prompt = f"""
-            Generate an enthusiastic, conversational success message for a {asset_display} that was just created.
-            
+            Generate an enthusiastic, conversational success message for a {asset_display} that was just created. At the end of the response, include 4-5 actionable prompts under the heading "Recommended Next Steps" that users can use to continue building their brand using the current asset. Give the response in Markdown format.
+
             ASSET DETAILS:
             - Brand: {brand_name}
             - Asset Type: {asset_display}
@@ -1498,28 +1498,31 @@ Always prioritize using the tool over giving generic advice."""
             - Colors: {color_palette}
             - Industry: {industry}
             - User Context: {user_context if user_context else 'None'}
-            
+
             KEY BENEFITS TO MENTION (pick 2-3):
             {', '.join(asset_info['benefits'])}
-            
-            CONVERSATION STARTERS (pick 2-3):
+
+            NEXT STEP IDEAS (use these as inspiration for prompts):
             {', '.join(asset_info['next_steps'])}
-            
+
             REQUIREMENTS:
             1. Start with genuine excitement about the completed {asset_display}
             2. Mention 2-3 specific benefits or design elements that work well
             3. Reference the context if provided: {context_mention if context_mention else 'N/A'}
-            4. Ask 2-3 engaging follow-up questions or suggest next steps
-            5. Use emojis strategically (not overuse)
-            6. Be conversational like ChatGPT - natural, not robotic
-            7. Keep it 3-4 sentences with natural flow
-            8. Include specific asset type benefits
-            
-            TONE: Enthusiastic designer who just completed an amazing project and is excited to show it off and discuss next steps.
-            
+            4. Generate 4-5 specific prompts that users can copy-paste to create related assets using the current {asset_display}
+            5. Each prompt should be actionable and build directly on the current asset (e.g., "Use this logo to create business cards")
+            6. Use emojis strategically (not overuse)
+            7. Be conversational like ChatGPT - natural, not robotic
+            8. Keep the main message 3-4 sentences with natural flow
+            9. Include specific asset type benefits
+
+            TONE: Enthusiastic designer who just completed an amazing project and is excited to show it off and help users expand their brand.
+
+            FOCUS: The "Recommended Next Steps" should ONLY contain prompts that leverage the current asset to create complementary brand materials. Make each prompt something the user can immediately try by copying and pasting.
+
             Generate a unique, natural response that doesn't sound templated.
             """
-            
+                        
             try:
                 response = openai_client.chat.completions.create(
                     model="gpt-4",
@@ -2337,6 +2340,26 @@ Always prioritize using the tool over giving generic advice."""
                 "design_decisions": design_thinking["decisions"],
                 "prompt_strategy": design_thinking["prompt_strategy"],
                 "status": "design_thinking_complete"
+            }
+
+            # ✅ MARK TOOL AS COMPLETED (ADD THIS)
+            all_tool_steps.append({
+                "type": "tool_result",
+                "name": "Creative Design Process",
+                "message": "✅ Design strategy analyzed and creative approach finalized",
+                "status": "completed",
+                "data": {
+                    "creative_process": design_thinking["creative_process"],
+                    "design_decisions": design_thinking["decisions"]
+                },
+                "timestamp": datetime.utcnow().isoformat()
+            })
+
+            yield {
+                "type": "tool_result",
+                "tool_name": "Creative Design Process",
+                "message": "✅ Design strategy analyzed and creative approach finalized",
+                "status": "completed"
             }
             
             await asyncio.sleep(0.3)
