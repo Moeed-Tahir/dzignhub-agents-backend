@@ -87,6 +87,31 @@ def search_conversations(
     except Exception as e:
         print(f"[DEBUG] Search route error: {e}")
         return {"success": False, "error": str(e)}
+    
+@router.post("/save-rich-message")
+async def save_rich_message(request: dict):
+    """Save a complete rich message object"""
+    try:
+        conversation_id = request.get('conversation_id')
+        message_data = request.get('message', {})
+        user_id = request.get('user_id')
+        
+        if not conversation_id or not message_data:
+            raise HTTPException(status_code=400, detail="Missing conversation_id or message data")
+        
+        # Get the brand designer agent and save
+        agent = get_brand_designer_agent(user_id, conversation_id)
+        result = agent.save_rich_message(conversation_id, user_id, message_data)
+        
+        if result["type"] == "success":
+            return result
+        else:
+            raise HTTPException(status_code=500, detail=result["message"])
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save message: {str(e)}")
+
+
 
 @router.get("/conversations/single-agent/{agent}/{userId}")
 def get_user_conversations_by_agent(

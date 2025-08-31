@@ -2064,10 +2064,16 @@ Always prioritize using the tool over giving generic advice."""
                 "message": f"Processing error: {str(e)}"
             }
 
-    
+
+
     async def stream_asset_generation_with_real_thinking(self, query: str) -> AsyncGenerator[Dict[str, Any], None]:
         """Stream asset generation with REAL model thinking - TRUE SEQUENTIAL EXECUTION"""
         try:
+            # ✅ INITIALIZE: Accumulate tool steps and thinking process data
+            all_tool_steps = []
+            thinking_process_data = {}
+
+            # Save user message (optional, but keep if needed for context)
             if self.conversation_id and self.user_id:
                 MongoDB.save_message(
                     conversation_id=self.conversation_id,
@@ -2076,8 +2082,8 @@ Always prioritize using the tool over giving generic advice."""
                     text=query
                 )
                 print(f"[DEBUG] User message saved to MongoDB: {query}")
-        
-        # ✅ Store user query in Pinecone
+            
+            # Store user query in Pinecone (optional)
             store_in_pinecone(
                 agent_type="brand-designer", 
                 role="user", 
@@ -2086,7 +2092,7 @@ Always prioritize using the tool over giving generic advice."""
                 conversation_id=self.conversation_id
             )
             print(f"[DEBUG] User message stored in Pinecone")
-        
+            
             # ✅ STEP 1: REAL MODEL THINKING ABOUT THE REQUEST
             yield {
                 "type": "thinking_start",
@@ -2094,9 +2100,17 @@ Always prioritize using the tool over giving generic advice."""
                 "status": "thinking"
             }
             
-            # ✅ WAIT FOR ACTUAL THINKING TO COMPLETE (not hardcoded time)
+            # ✅ WAIT FOR ACTUAL THINKING TO COMPLETE
             thinking_result = await self.get_real_model_thinking(query)
             print("Model thinking completed:", thinking_result)
+            
+            # ✅ ACCUMULATE: Store thinking process data
+            thinking_process_data = {
+                "thinking": thinking_result["thinking"],
+                "reasoning": thinking_result["reasoning"],
+                "analysis": thinking_result["analysis"],
+                "plan": thinking_result["plan"]
+            }
             
             yield {
                 "type": "thinking_process",
@@ -2108,10 +2122,9 @@ Always prioritize using the tool over giving generic advice."""
                 "status": "thinking_complete"
             }
             
-            # ✅ SMALL UI DELAY (optional, for UX)
-            await asyncio.sleep(0.3)  # Just for smooth UI transition
+            await asyncio.sleep(0.3)
 
-            # ✅ STEP 2: WEB SEARCH - STARTS ONLY AFTER THINKING IS DONE
+            # ✅ STEP 2: WEB SEARCH
             yield {
                 "type": "tool_start",
                 "tool_name": "Web Search Engine",
@@ -2124,21 +2137,33 @@ Always prioritize using the tool over giving generic advice."""
             search_results = self.search_with_keywords(search_keywords)
             formatted_results = self.format_search_results(search_results)
             
+            # ✅ ACCUMULATE: Add tool step
+            all_tool_steps.append({
+                "type": "tool_result",
+                "name": "Web Search Engine",
+                "message": f"✅ Found {len(formatted_results)} relevant articles and references",
+                "status": "completed",
+                "data": {
+                    "keywords": search_keywords,
+                    "results": formatted_results
+                },
+                "timestamp": datetime.utcnow().isoformat()
+            })
+            
             yield {
                 "type": "web_search_complete",
                 "tool_name": "Web Search Engine", 
                 "message": f"✅ Found {len(formatted_results)} relevant articles and references",
                 "data": {
-                    "keywords": search_keywords,  # ✅ Frontend expects this
-                    "results": formatted_results  # ✅ Frontend expects this
+                    "keywords": search_keywords,
+                    "results": formatted_results
                 },
                 "status": "web_search_complete"
-                }
+            }
             
-            # ✅ SMALL UI DELAY
             await asyncio.sleep(0.3)
             
-            # ✅ STEP 3: IMAGE SEARCH - STARTS ONLY AFTER WEB SEARCH IS DONE
+            # ✅ STEP 3: IMAGE SEARCH
             yield {
                 "type": "tool_start",
                 "tool_name": "Design Inspiration Finder",
@@ -2148,6 +2173,16 @@ Always prioritize using the tool over giving generic advice."""
             
             # ✅ WAIT FOR ACTUAL IMAGE SEARCH TO COMPLETE
             inspiration_images = self.search_images(f"{search_keywords} design inspiration", num_results=8)
+            
+            # ✅ ACCUMULATE: Add tool step
+            all_tool_steps.append({
+                "type": "tool_result",
+                "name": "Design Inspiration Finder",
+                "message": f"🎨 Found {len(inspiration_images)} design inspirations",
+                "status": "completed",
+                "data": inspiration_images,
+                "timestamp": datetime.utcnow().isoformat()
+            })
             
             yield {
                 "type": "inspiration_images",
@@ -2159,7 +2194,7 @@ Always prioritize using the tool over giving generic advice."""
             
             await asyncio.sleep(0.3)
             
-            # ✅ STEP 4: BRAND EXTRACTION - STARTS ONLY AFTER INSPIRATION IS DONE
+            # ✅ STEP 4: BRAND EXTRACTION
             yield {
                 "type": "tool_start",
                 "tool_name": "Brand Information Extractor",
@@ -2170,6 +2205,12 @@ Always prioritize using the tool over giving generic advice."""
             # ✅ WAIT FOR ACTUAL EXTRACTION THINKING TO COMPLETE
             extraction_thinking = await self.get_real_extraction_thinking(query)
             
+            # ✅ ACCUMULATE: Update thinking process
+            thinking_process_data.update({
+                "process": extraction_thinking["process"],
+                "findings": extraction_thinking["findings"]
+            })
+            
             yield {
                 "type": "thinking_process",
                 "message": "🧠 Information Extraction Analysis:",
@@ -2179,7 +2220,7 @@ Always prioritize using the tool over giving generic advice."""
                 "status": "extraction_thinking"
             }
             
-            # ✅ PERFORM ACTUAL EXTRACTION (wait for completion)
+            # ✅ PERFORM ACTUAL EXTRACTION
             recent_messages = []
             if self.conversation_id and self.user_id:
                 recent_messages = MongoDB.get_conversation_messages(self.conversation_id, self.user_id)
@@ -2192,6 +2233,16 @@ Always prioritize using the tool over giving generic advice."""
             
             extracted_info = {k: v for k, v in self.design_info.items() if v}
             
+            # ✅ ACCUMULATE: Add tool step
+            all_tool_steps.append({
+                "type": "tool_result",
+                "name": "Brand Information Extractor",
+                "message": f"✅ Extracted: {', '.join(extracted_info.keys()) if extracted_info else 'Basic information'}",
+                "status": "completed",
+                "data": extracted_info,
+                "timestamp": datetime.utcnow().isoformat()
+            })
+            
             yield {
                 "type": "tool_result",
                 "tool_name": "Brand Information Extractor",
@@ -2200,31 +2251,28 @@ Always prioritize using the tool over giving generic advice."""
                 "status": "info_extracted"
             }
             
-            # Check if we need more info before continuing
+            # Check if we need more info
             if not self.design_info.get("brand_name"):
                 asset_type = self.get_final_asset_type(query)
-
                 comprehensive_questions = self.ask_comprehensive_asset_questions(asset_type)
+                
                 yield {
-                    "type": "message",
+                    "type": "complete",
+                    "status": "awaiting_input",
                     "message": comprehensive_questions,
-                    "status": "awaiting_input"
+                    "final_data": {
+                        "search_results": formatted_results,
+                        "search_keywords": search_keywords,
+                        "inspiration_images": inspiration_images,
+                        "tool_steps": all_tool_steps,
+                        "thinking_process": thinking_process_data
+                    }
                 }
-                yield {
-                "type": "complete",
-                "status": "awaiting_input",
-                "message": comprehensive_questions,
-                "final_data": {
-                    "search_results": formatted_results,
-                    "search_keywords": search_keywords,
-                    "inspiration_images": inspiration_images
-                }
-            }
                 return
             
             await asyncio.sleep(0.3)
             
-            # ✅ STEP 5: AUTO-COMPLETION - STARTS ONLY AFTER EXTRACTION IS DONE
+            # ✅ STEP 5: AUTO-COMPLETION
             missing_info = [k for k, v in self.design_info.items() if not v]
             
             if missing_info:
@@ -2243,6 +2291,16 @@ Always prioritize using the tool over giving generic advice."""
                 
                 completed_fields = [k for k in missing_info if self.design_info.get(k)]
                 
+                # ✅ ACCUMULATE: Add tool step
+                all_tool_steps.append({
+                    "type": "tool_result",
+                    "name": "Smart Auto-Completion",
+                    "message": f"✅ Completed: {', '.join(completed_fields) if completed_fields else 'Brand information'}",
+                    "status": "completed",
+                    "data": {k: self.design_info[k] for k in completed_fields if self.design_info.get(k)},
+                    "timestamp": datetime.utcnow().isoformat()
+                })
+                
                 yield {
                     "type": "tool_result",
                     "tool_name": "Smart Auto-Completion", 
@@ -2253,7 +2311,7 @@ Always prioritize using the tool over giving generic advice."""
             
             await asyncio.sleep(0.3)
             
-            # ✅ STEP 6: DESIGN THINKING - STARTS ONLY AFTER AUTO-COMPLETION IS DONE
+            # ✅ STEP 6: DESIGN THINKING
             yield {
                 "type": "tool_start",
                 "tool_name": "Creative Design Process",
@@ -2263,6 +2321,13 @@ Always prioritize using the tool over giving generic advice."""
             
             # ✅ WAIT FOR ACTUAL DESIGN THINKING TO COMPLETE
             design_thinking = await self.get_real_design_thinking(self.design_info, query)
+            
+            # ✅ ACCUMULATE: Update thinking process
+            thinking_process_data.update({
+                "creative_process": design_thinking["creative_process"],
+                "design_decisions": design_thinking["decisions"],
+                "prompt_strategy": design_thinking["prompt_strategy"]
+            })
             
             yield {
                 "type": "thinking_process",
@@ -2276,7 +2341,7 @@ Always prioritize using the tool over giving generic advice."""
             
             await asyncio.sleep(0.3)
             
-            # ✅ STEP 7: ASSET GENERATION - STARTS ONLY AFTER DESIGN THINKING IS DONE
+            # ✅ STEP 7: ASSET GENERATION
             yield {
                 "type": "tool_start",
                 "tool_name": "DALL-E 3 Asset Generator",
@@ -2292,16 +2357,27 @@ Always prioritize using the tool over giving generic advice."""
                 user_context=query
             )
             
-            # At the end of your stream_asset_generation_with_real_thinking method:
-
             if asset_result["type"] == "asset_generated":
+                # ✅ ACCUMULATE: Add final tool step
+                all_tool_steps.append({
+                    "type": "tool_result",
+                    "name": "DALL-E 3 Asset Generator",
+                    "message": "✅ Asset generated successfully!",
+                    "status": "completed",
+                    "data": {
+                        "image_url": asset_result["image_url"],
+                        "brand_info": asset_result["brand_info"]
+                    },
+                    "timestamp": datetime.utcnow().isoformat()
+                })
+                
                 yield {
                     "type": "tool_result",
                     "tool_name": "DALL-E 3 Asset Generator",
                     "message": "✅ Asset generated successfully!",
                     "status": "asset_generated"
                 }
-
+                
                 await asyncio.sleep(0.3)
                 
                 # Final response with asset
@@ -2315,57 +2391,45 @@ Always prioritize using the tool over giving generic advice."""
                     "status": "complete"
                 }
                 
-                # ✅ ADD: Send completion signal
+                # ✅ SEND COMPLETE EVENT WITH ALL ACCUMULATED DATA
                 yield {
-                "type": "complete",
-                "status": "complete",
-                "final_data": {
-                    "search_results": formatted_results,  # ✅ Include search results in completion
-                    "search_keywords": search_keywords,
-                    "inspiration_images": inspiration_images
+                    "type": "complete",
+                    "status": "complete",
+                    "message": asset_result["message"],
+                    "final_data": {
+                        "image_url": asset_result["image_url"],
+                        "brand_info": asset_result["brand_info"],
+                        "search_results": formatted_results,
+                        "search_keywords": search_keywords,
+                        "inspiration_images": inspiration_images,
+                        "tool_steps": all_tool_steps,  # ✅ NOW DEFINED AND ACCUMULATED
+                        "thinking_process": thinking_process_data  # ✅ NOW DEFINED AND ACCUMULATED
                     }
                 }
+                try:
+                    final_message_data = {
+                        "sender": "agent",
+                        "text": asset_result["message"],
+                        "toolSteps": all_tool_steps,
+                        "thinkingProcess": thinking_process_data,
+                        "searchResults": {
+                            "keywords": search_keywords,
+                            "results": formatted_results
+                        },
+                        "inspirationImages": inspiration_images,
+                        "imageUrl": asset_result["image_url"],
+                        "isLogo": True,
+                        "status": "complete"
+                    }
+                    save_result = self.save_rich_message(self.conversation_id, self.user_id, final_message_data)
+                    if save_result["type"] == "success":
+                        print(f"[DEBUG] Final message saved successfully to DB for conversation {self.conversation_id}")
+                    else:
+                        print(f"[DEBUG] Failed to save final message: {save_result['message']}")
+                except Exception as save_error:
+                    print(f"[DEBUG] Error saving final message: {str(save_error)}")
                 
-                # Save to MongoDB
-                if self.conversation_id and self.user_id:
-                    final_response = f"""ASSET_GENERATED|{asset_result['image_url']}|{asset_result['message']}"""
-                    MongoDB.save_message(
-                        conversation_id=self.conversation_id,
-                        user_id=self.user_id,
-                        sender='agent',
-                        text=final_response,
-                        agent=self.agent_name
-                    )
-
-                    store_in_pinecone(
-                    agent_type="brand-designer", 
-                    role="agent", 
-                    text=final_response,
-                    user_id=self.user_id,
-                    conversation_id=self.conversation_id
-                    )
-                    search_results_data = {
-                        "keywords": search_keywords,
-                        "results": formatted_results
-                    } if formatted_results else None
-        
-                    # Save message with search data
-                    MongoDB.save_message_with_search_data(
-                        conversation_id=self.conversation_id,
-                        user_id=self.user_id,
-                        sender='agent',
-                        text=asset_result['message'],
-                        agent=self.agent_name,
-                        search_results=search_results_data,
-                        inspiration_images=inspiration_images
-                    )
-                    store_in_pinecone(
-                    agent_type="brand-designer", 
-                    role="agent", 
-                    text=asset_result['message'],
-                    user_id=self.user_id,
-                    conversation_id=self.conversation_id
-                    )
+                
             else:
                 yield {
                     "type": "error",
@@ -2373,20 +2437,82 @@ Always prioritize using the tool over giving generic advice."""
                     "status": "generation_failed"
                 }
                 
-                # ✅ ADD: Send completion signal even for errors
+                # ✅ SEND COMPLETE SIGNAL EVEN FOR ERRORS
                 yield {
                     "type": "complete",
-                    "status": "error"
+                    "status": "error",
+                    "message": asset_result["message"],
+                    "final_data": {
+                        "tool_steps": all_tool_steps,
+                        "thinking_process": thinking_process_data
+                    }
                 }
-                
+                try:
+                    error_message_data = {
+                        "sender": "agent",
+                        "text": asset_result["message"],
+                        "toolSteps": all_tool_steps,
+                        "thinkingProcess": thinking_process_data,
+                        "status": "error"
+                    }
+                    save_result = self.save_rich_message(self.conversation_id, self.user_id, error_message_data)
+                    if save_result["type"] == "success":
+                        print(f"[DEBUG] Error message saved successfully to DB for conversation {self.conversation_id}")
+                    else:
+                        print(f"[DEBUG] Failed to save error message: {save_result['message']}")
+                except Exception as save_error:
+                    print(f"[DEBUG] Error saving error message: {str(save_error)}")
+                    
+                    
         except Exception as e:
             yield {
                 "type": "error",
                 "message": f"Asset generation failed: {str(e)}",
                 "status": "error"
             }
+            
+            # ✅ SEND COMPLETE SIGNAL ON EXCEPTION
+            yield {
+                "type": "complete",
+                "status": "error",
+                "message": f"Asset generation failed: {str(e)}",
+                "final_data": {
+                    "tool_steps": all_tool_steps if 'all_tool_steps' in locals() else [],
+                    "thinking_process": thinking_process_data if 'thinking_process_data' in locals() else {}
+                }
+            }
 
-
+    def save_rich_message(self, conversation_id: str, user_id: str, message_data: dict):
+        """Save a rich message object to MongoDB"""
+        try:
+            # ✅ EXTRACT STANDARD FIELDS (for the new method)
+            standard_data = {
+                'conversation_id': conversation_id,
+                'user_id': user_id,
+                'sender': message_data.get('sender', 'agent'),
+                'text': message_data.get('text', ''),
+                'agent': self.agent_name
+            }
+            
+            # ✅ EXTRACT RICH DATA (everything else)
+            rich_data = {k: v for k, v in message_data.items() if k not in ['conversation_id', 'user_id', 'sender', 'text', 'agent', 'timestamp']}
+            
+            # ✅ SAVE USING NEW METHOD
+            MongoDB.save_rich_message(**standard_data, **rich_data)
+            
+            # ✅ STORE IN PINECONE (unchanged)
+            store_in_pinecone(
+                agent_type=self.agent_name,
+                role='agent',
+                text=message_data.get('text', ''),
+                user_id=user_id,
+                conversation_id=conversation_id
+            )
+            
+            return {"type": "success", "message": "Rich message saved successfully"}
+        except Exception as e:
+            print(f"Error saving rich message: {e}")
+            return {"type": "error", "message": str(e)}
 
 
     async def stream_conversation_response(self, query: str) -> AsyncGenerator[Dict[str, Any], None]:

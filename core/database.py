@@ -78,6 +78,30 @@ class MongoDB:
             
         result = messages_collection.insert_one(message)
         return str(result.inserted_id)
+    
+    @staticmethod
+    def save_rich_message(conversation_id: str, user_id: str, sender: str, text: str, agent: str = None, **kwargs):
+        """Save a message with rich data (e.g., toolSteps, thinkingProcess) to MongoDB"""
+        message = {
+            "conversationId": ObjectId(conversation_id),
+            "userId": ObjectId(user_id),
+            "sender": sender,
+            "text": text,
+            "createdAt": datetime.utcnow(),
+            "updatedAt": datetime.utcnow()
+        }
+        
+        if agent and sender == 'agent':
+            message["agent"] = agent
+            
+        # ✅ ADD: Include rich data fields from kwargs (e.g., toolSteps, thinkingProcess)
+        for key, value in kwargs.items():
+            message[key] = value
+            print(f"[DEBUG] Adding rich field '{key}' to message")
+            
+        result = messages_collection.insert_one(message)
+        print(f"[DEBUG] Rich message saved with ID: {str(result.inserted_id)}")
+        return str(result.inserted_id)
 
     @staticmethod
     def get_conversation_messages(conversation_id: str, user_id: str = None):
