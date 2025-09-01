@@ -13,8 +13,9 @@ from fastapi.responses import StreamingResponse
 import json
 import asyncio
 from typing import AsyncGenerator
-
+from groq import Groq
 router = APIRouter()
+from core.config import OPENAI_API_KEY, PINECONE_API_KEY, PINECONE_ENV, GROQ_API_KEY, SEARCHAPI_KEY
 
 # Request Models
 class ChatRequest(BaseModel):
@@ -60,6 +61,56 @@ def create_conversation(request: NewConversationRequest):
         }
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+@router.post("/generate-immediate-response")
+async def generate_immediate_response(request: dict):
+    """Generate a dynamic, conversational immediate response using Groq"""
+    try:
+        user_input = request.get("user_input", "")
+        if not user_input:
+            raise HTTPException(status_code=400, detail="User input is required")
+        
+        # Initialize Groq client
+        groq_client = Groq(api_key=GROQ_API_KEY)
+        
+        # Updated prompt to generate responses like "I will generate [this]" based on user input
+        prompt = f"Generate a brief, engaging, and conversational response (under 50 words) starting with 'I will generate' followed by what the user is requesting, based on this user input for an AI design assistant: '{user_input}'. Make it friendly."
+        
+        # Use the specified model
+        response = groq_client.chat.completions.create(
+            model="llama-3.1-8b-instant",  # Updated model as specified
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=50,  # Keep short for speed
+            temperature=0.7,  # Balanced creativity
+            timeout=3  # 3-second timeout to match your limit
+        )
+        
+        ai_response = response.choices[0].message.content.strip()
+        
+        return {
+            "success": True,
+            "response": ai_response,
+            "model": "llama-3.1-8b-instant"
+        }
+    except Exception as e:
+        print(f"[DEBUG] Groq immediate response failed: {e}")
+        # Fallback to static response
+        fallback_response = generate_immediate_response_fallback(user_input)
+        return {
+            "success": False,
+            "response": fallback_response,
+            "error": str(e)
+        }
+
+def generate_immediate_response_fallback(user_input: str) -> str:
+    input_lower = user_input.lower()
+    if "logo" in input_lower:
+        return "🎨 I'll create a professional logo for you! Let's start by analyzing your requirements..."
+    elif "instagram" in input_lower and ("post" in input_lower or "poster" in input_lower):
+        return "📱 I'll design an Instagram post for you! Let's gather the details..."
+    # ...add more fallbacks as needed...
+    else:
+        return "💭 I'm analyzing your request and will help you create what you need! Let's get started..."
 
 @router.get("/conversations/search")
 def search_conversations(
