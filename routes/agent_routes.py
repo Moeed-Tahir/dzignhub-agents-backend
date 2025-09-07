@@ -16,6 +16,7 @@ from typing import AsyncGenerator
 from groq import Groq
 router = APIRouter()
 from core.config import OPENAI_API_KEY, PINECONE_API_KEY, PINECONE_ENV, GROQ_API_KEY, SEARCHAPI_KEY
+from agents.pitch_deck import get_pitch_deck_agent, search_conversations_by_query as search_pitch_deck_conversations
 
 # Request Models
 class ChatRequest(BaseModel):
@@ -61,6 +62,7 @@ def create_conversation(request: NewConversationRequest):
         }
     except Exception as e:
         return {"success": False, "error": str(e)}
+
 
 @router.post("/generate-immediate-response")
 async def generate_immediate_response(request: dict):
@@ -112,6 +114,7 @@ def generate_immediate_response_fallback(user_input: str) -> str:
     else:
         return "💭 I'm analyzing your request and will help you create what you need! Let's get started..."
 
+
 @router.get("/conversations/search")
 def search_conversations(
     query: str = Query(..., description="Search query"),
@@ -139,6 +142,7 @@ def search_conversations(
         print(f"[DEBUG] Search route error: {e}")
         return {"success": False, "error": str(e)}
     
+
 @router.post("/save-rich-message")
 async def save_rich_message(request: dict):
     """Save a complete rich message object"""
@@ -182,6 +186,7 @@ def get_user_conversations_by_agent(
         }
     except Exception as e:
         return {"success": False, "error": str(e)}
+
 
 
 @router.get("/conversations/{user_id}")
@@ -1130,3 +1135,270 @@ def generate_seo_title_pattern(prompt: str) -> str:
     except Exception as e:
         print(f"[DEBUG] SEO title pattern generation error: {e}")
         return "SEO Chat"
+    
+
+
+
+# Pitch Deck Routes
+@router.post("/pitch-deck")
+def pitch_deck_endpoint(request: ChatRequest):
+    """Pitch deck endpoint with automatic context handling"""
+    try:
+        # Create conversation if not provided
+        conversation_id = request.conversation_id
+        is_new_conversation = False
+        
+        if not conversation_id:
+            # Use AI-powered title generation with keyword fallback
+            dynamic_title = generate_dynamic_pitch_deck_title(request.prompt)
+            
+            conversation_id = MongoDB.create_conversation(
+                user_id=request.user_id,
+                agent="pitch-deck", 
+                title=dynamic_title
+            )
+            is_new_conversation = True
+
+        # Get agent and handle query
+        agent = get_pitch_deck_agent(
+            user_id=request.user_id,
+            conversation_id=conversation_id
+        )
+        
+        response = agent.handle_query(request.prompt)
+        
+        return {
+            "success": True,
+            "response": response,
+            "conversation_id": conversation_id,
+            "is_new_conversation": is_new_conversation,
+            "agent": "pitch-deck"
+        }
+    except Exception as e:
+        print(f"Error in pitch deck endpoint: {e}")
+        return {"success": False, "error": str(e)}
+
+@router.post("/pitch-deck/stream")
+async def pitch_deck_stream_endpoint(request: ChatRequest):
+    """Pitch deck endpoint with streaming responses"""
+    try:
+        # Create conversation if not provided
+        conversation_id = request.conversation_id
+        is_new_conversation = False
+        
+        if conversation_id is None:
+            dynamic_title = generate_dynamic_pitch_deck_title(request.prompt)
+            conversation_id = MongoDB.create_conversation(
+                user_id=request.user_id,
+                agent="pitch-deck", 
+                title=dynamic_title
+            )
+            print("New conversation id: ", conversation_id)
+            is_new_conversation = True
+
+        if not conversation_id:
+            raise Exception("Failed to create or retrieve conversation ID")
+
+        # Get agent
+        agent = get_pitch_deck_agent(
+            user_id=request.user_id,
+            conversation_id=str(conversation_id)
+        )
+        
+        # Create streaming generator
+        async def generate_stream():
+            try:
+                # Send initial response
+                initial_data = {
+                    "type": "conversation_info",
+                    "conversation_id": conversation_id,
+                    "is_new_conversation": is_new_conversation,
+                    "agent": "pitch-deck"
+                }
+                yield f"data: {json.dumps(initial_data)}\n\n"
+                
+                # Stream the agent response
+                async for chunk in agent.handle_query_stream(request.prompt):
+                    print(f"[DEBUG] Streaming chunk: {chunk.get('type', 'unknown')}")
+                    yield f"data: {json.dumps(chunk)}\n\n"
+                
+                # Send completion signal
+                completion_data = {"type": "complete"}
+                yield f"data: {json.dumps(completion_data)}\n\n"
+                
+            except Exception as e:
+                error_data = {"type": "error", "message": str(e)}
+                yield f"data: {json.dumps(error_data)}\n\n"
+
+        return StreamingResponse(
+            generate_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "*",
+            }
+        )
+        
+    except Exception as e:
+        print(f"Error in pitch deck stream endpoint: {e}")
+        return {"success": False, "error": str(e)}
+
+@router.get("/pitch-deck")
+def pitch_deck_status():
+    """Get pitch deck agent status"""
+    return {
+        "success": True,
+        "message": "Pitch Deck Agent is running!",
+        "agent": "pitch-deck",
+        "version": "1.0.0"
+    }
+
+# Pitch deck-specific search endpoint
+@router.get("/pitch-deck/search")
+def search_pitch_deck_conversations_endpoint(
+    query: str = Query(..., description="Search query"),
+    user_id: str = Query(..., description="User ID"),
+    limit: int = Query(10, description="Number of results to return")
+):
+    """Search pitch deck conversations using vector similarity"""
+    try:
+        search_results = search_pitch_deck_conversations(
+            query=query,
+            user_id=user_id,
+            agent_type="pitch-deck",
+            top_k=limit
+        )
+        
+        return {
+            "success": True,
+            "results": search_results,
+            "count": len(search_results),
+            "query": query
+        }
+    except Exception as e:
+        print(f"[DEBUG] Pitch deck search route error: {e}")
+        return {"success": False, "error": str(e)}
+
+# Add title generation helper function for pitch deck
+def generate_dynamic_pitch_deck_title(prompt: str) -> str:
+    """Generate title for pitch deck conversations using OpenAI (fallback to keyword-based)"""
+    try:
+        openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        
+        response = openai_client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "Generate a short, descriptive title (3-5 words) for a pitch deck creation conversation based on the user's request. Focus on the business type or presentation purpose."},
+                {"role": "user", "content": f"User request: {prompt}"}
+            ],
+            max_tokens=20,
+            temperature=0.3
+        )
+        
+        ai_title = response.choices[0].message.content.strip()
+        
+        # Clean up the title (remove quotes, etc.)
+        ai_title = ai_title.replace('"', '').replace("'", '')
+        
+        # Validate length
+        if len(ai_title) > 50:
+            raise Exception("Title too long")
+            
+        print(f"[DEBUG] Generated AI pitch deck title: {ai_title}")
+        return ai_title
+        
+    except Exception as e:
+        print(f"[DEBUG] AI pitch deck title generation failed: {e}, using keyword-based")
+        return generate_pitch_deck_title_pattern(prompt)  # Fallback to keyword-based
+
+def generate_pitch_deck_title_pattern(prompt: str) -> str:
+    """Generate title for pitch deck conversations using keyword patterns"""
+    try:
+        prompt_clean = prompt.strip().lower()
+        
+        title_patterns = {
+            # Presentation Types
+            "investor pitch": "Investor Pitch Deck",
+            "investor presentation": "Investor Presentation",
+            "funding pitch": "Funding Pitch Deck",
+            "investor deck": "Investor Deck",
+            "pitch deck": "Pitch Deck",
+            
+            # Client Presentations
+            "client pitch": "Client Pitch Deck",
+            "client presentation": "Client Presentation",
+            "proposal deck": "Proposal Deck",
+            "sales deck": "Sales Pitch Deck",
+            
+            # Product Presentations
+            "product launch": "Product Launch Deck",
+            "product presentation": "Product Presentation",
+            "product demo": "Product Demo Deck",
+            
+            # Company Presentations
+            "company presentation": "Company Presentation",
+            "business overview": "Business Overview",
+            "company profile": "Company Profile Deck",
+            
+            # Specific Types
+            "startup pitch": "Startup Pitch Deck",
+            "seed round": "Seed Round Deck",
+            "series a": "Series A Pitch Deck",
+            "crowdfunding": "Crowdfunding Deck",
+            
+            # General
+            "slide deck": "Slide Deck",
+            "presentation": "Presentation Deck",
+            "deck": "Pitch Deck",
+            "slides": "Presentation Slides"
+        }
+        
+        # Check for specific patterns (most specific first)
+        for keyword, title in title_patterns.items():
+            if keyword in prompt_clean:
+                return title
+        
+        # Extract business type and presentation type if available
+        business_types = ['startup', 'saas', 'tech', 'healthcare', 'ecommerce', 'app', 'platform', 'service']
+        presentation_types = ['investor', 'client', 'product', 'sales', 'funding']
+        
+        found_business = None
+        found_presentation = None
+        
+        words = prompt.split()
+        for word in words:
+            word_lower = word.lower()
+            if not found_business:
+                for btype in business_types:
+                    if btype in word_lower:
+                        found_business = btype.title()
+                        break
+            
+            if not found_presentation:
+                for ptype in presentation_types:
+                    if ptype in word_lower:
+                        found_presentation = ptype.title()
+                        break
+        
+        if found_business and found_presentation:
+            return f"{found_business} {found_presentation} Deck"
+        elif found_business:
+            return f"{found_business} Pitch Deck"
+        elif found_presentation:
+            return f"{found_presentation} Pitch Deck"
+        
+        # Check if it contains company/business name
+        if "for" in prompt_clean:
+            parts = prompt_clean.split("for")
+            if len(parts) > 1 and parts[1].strip():
+                potential_name = parts[1].strip().split()[0].title()
+                if len(potential_name) > 2:  # Ensure it's a reasonable name length
+                    return f"{potential_name} Pitch Deck"
+        
+        return "Pitch Deck"
+        
+    except Exception as e:
+        print(f"[DEBUG] Pitch deck title pattern generation error: {e}")
+        return "Pitch Deck"
