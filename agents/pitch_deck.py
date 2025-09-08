@@ -397,6 +397,7 @@ class PitchDeckAgent:
         self.searchapi_key = SEARCHAPI_KEY
         self.search_base_url = "https://www.searchapi.io/api/v1/search"
         self.detected_deck_type = None
+        self.slides_generated = False
         self.user_context = None
         print(f"[DEBUG] Initialized with reasoning model: {self.reasoning_model}")
         
@@ -471,7 +472,7 @@ Always prioritize using the tool for any pitch deck requests."""
             memory=self.memory,
             verbose=True,
             agent_kwargs={
-                'system_message': """You are Max, a professional pitch deck creator who helps users create compelling presentations.
+               'system_message': """You are Max, a professional pitch deck creator who helps users create compelling presentations.
 
 Your capabilities:
 - Pitch deck creation using Gamma AI
@@ -484,15 +485,19 @@ When users mention wanting ANY pitch deck, immediately use the Generate_Pitch_De
 
 CRITICAL INSTRUCTION: When the tool returns a response that starts with "SLIDES_GENERATED|", you MUST return that EXACT response without any modifications, additions, or formatting changes. Do not convert it to markdown, do not add explanations, just return the exact string as-is.
 
+MOST IMPORTANT: After returning a "SLIDES_GENERATED|" response, you MUST STOP COMPLETELY. Do not continue the conversation or start a new chain. Consider the task finished.
+
 Examples:
-- If tool returns: "SLIDES_GENERATED|https://slides-url|message"
+- If tool returns: "SLIDES_GENERATED|https://slides-url|message|DO_NOT_CONTINUE"
 - You return: "SLIDES_GENERATED|https://slides-url|message" (EXACTLY)
+- Then STOP immediately.
 
 For all other responses, be conversational and friendly.
 
 Key guidelines:
 - Always use the tool for ANY pitch deck-related requests
 - NEVER modify SLIDES_GENERATED responses
+- After returning SLIDES_GENERATED, STOP IMMEDIATELY
 - Trust the tool to handle information collection and generation
 - Focus on being helpful and strategic for non-deck conversations
 
@@ -966,108 +971,41 @@ Always prioritize using the tool over giving generic advice."""
         print(f"[DEBUG] Loaded {len(messages)} messages from conversation history")
 
 
+    # Replace the smart_deck_generator method:
     def smart_deck_generator(self, user_input: str = "") -> str:
-        """Smart pitch deck generation"""
+        """Smart pitch deck generation - TRIGGER ONLY, don't generate directly"""
         
         print(f"[DEBUG] smart_deck_generator called with input: '{user_input}'")
         print(f"[DEBUG] Initial pitch_info: {self.pitch_info}")
         
-        self.user_context = user_input
-        self.detected_deck_type = None
-        conversation_detected_type = None
-        
-        # Process input
-        processed_input = user_input
-        if user_input.startswith('{"') and user_input.endswith('}'):
+        # CHECK FOR EXISTING SLIDES ACROSS ALL USER CONVERSATIONS
+        if self.user_id and self.pitch_info.get('business_name'):
             try:
-                import json
-                parsed_input = json.loads(user_input)
-                processed_input = parsed_input.get("description", "generate pitch deck")
-            except:
-                pass
+                # Get all conversations for this user
+                user_conversations = MongoDB.get_user_conversations(self.user_id)
+                for conv in user_conversations:
+                    if conv.get('_id') == self.conversation_id:
+                        continue  # Skip current conversation
+                        
+                    messages = MongoDB.get_conversation_messages(conv['_id'], self.user_id)
+                    for msg in messages:
+                        if (msg.get('slidesUrl') and 
+                            msg.get('sender') == 'agent' and 
+                            msg.get('business_name') == self.pitch_info.get('business_name')):
+                            print("[DEBUG] Slides already generated for this business, returning existing URL")
+                            message = f"SLIDES_GENERATED|{msg['slidesUrl']}|Slides have already been generated for '{self.pitch_info.get('business_name')}'. You can access them at the provided URL.|DO_NOT_CONTINUE"
+                            return message
+            except Exception as e:
+                print(f"[DEBUG] Error checking for existing slides: {e}")
         
-        # Get ALL conversation messages
-        recent_messages = []
-        if self.conversation_id and self.user_id:
-            messages = MongoDB.get_conversation_messages(self.conversation_id, self.user_id)
-            recent_messages = messages
-            print(f"[DEBUG] Found {len(recent_messages)} total messages for analysis")
+        # DON'T GENERATE SLIDES HERE - Let the streaming method handle it
+        # This prevents duplicate generation
         
-        # Extract information from FULL conversation
-        if recent_messages:
-            self.extract_pitch_info_from_conversation(recent_messages)
-            conversation_detected_type = getattr(self, 'detected_deck_type', None)
-            print(f"[DEBUG] Conversation detected type: {conversation_detected_type}")
-        
-        # Extract from current input
-        if processed_input and processed_input.strip():
-            self.extract_from_current_input(processed_input)
-            current_input_detected_type = getattr(self, 'detected_deck_type', None)
-            print(f"[DEBUG] Current input detected type: {current_input_detected_type}")
-        
-        # Determine deck type from conversation or current input
-        deck_type = current_input_detected_type or conversation_detected_type or "investor"
-        print(f"[DEBUG] Final deck type: {deck_type}")
-        
-        # Check if we have enough information to generate a deck
-        missing_required_fields = []
-        required_fields = ["business_name", "target_audience", "industry"]
-        
-        for field in required_fields:
-            if not self.pitch_info.get(field):
-                missing_required_fields.append(field)
-        
-        # If missing required fields, auto-complete or ask questions
-        if missing_required_fields:
-            print(f"[DEBUG] Missing required fields: {missing_required_fields}")
-            
-            # Try auto-complete for missing fields
-            auto_completed = self.intelligent_auto_complete(self.pitch_info.copy(), deck_type)
-            still_missing = []
-            
-            for field in missing_required_fields:
-                if auto_completed.get(field):
-                    self.pitch_info[field] = auto_completed[field]
-                    print(f"[DEBUG] Auto-completed {field}: {auto_completed[field]}")
-                else:
-                    still_missing.append(field)
-            
-            # If still missing after auto-complete, ask questions
-            if still_missing:
-                print(f"[DEBUG] Still missing after auto-complete: {still_missing}")
-                comprehensive_questions = self.ask_comprehensive_pitch_questions()
-                
-                # Save the current state to DB for future completion
-                self.save_pitch_info()
-                
-                return comprehensive_questions
-        
-        # We have all required information, proceed with generation
-        print(f"[DEBUG] All required fields present, generating deck")
-        print(f"[DEBUG] Final pitch_info: {self.pitch_info}")
-        
-        # Save to DB before generation
-        self.save_pitch_info()
-        
-        # Generate pitch deck with Gamma AI
-        result = generate_slides_gamma(self.pitch_info, self.selectedTemplate)
-        
-        # Save the generated URL
-        if result["type"] == "slides_generated":
-            self.last_generated_slides = result["slides_url"]
-            
-            # Format for agent output
-            message = (
-                f"SLIDES_GENERATED|{result['slides_url']}|{result['message']}"
-            )
-            
-            print(f"[DEBUG] Slides generated successfully: {result['slides_url']}")
-            return message
-        else:
-            # Error in generation
-            error_message = f"I encountered an issue when creating your pitch deck: {result.get('message', 'Unknown error')}"
-            print(f"[DEBUG] Generation error: {error_message}")
-            return error_message
+        # Instead, return a message that indicates generation should proceed
+        # The streaming method will handle the actual generation
+        message = f"READY_TO_GENERATE|Pitch deck generation initiated for {self.pitch_info.get('business_name', 'your project')}|PROCEED_WITH_STREAMING"
+        print(f"[DEBUG] Triggering streaming generation process")
+        return message
 
 
     async def handle_query_stream(self, query: str) -> AsyncGenerator[Dict[str, Any], None]:
@@ -1128,29 +1066,34 @@ Always prioritize using the tool over giving generic advice."""
     async def stream_slides_generation_with_real_thinking(self, query: str) -> AsyncGenerator[Dict[str, Any], None]:
         """Stream slides generation with REAL model thinking - TRUE SEQUENTIAL EXECUTION"""
         try:
+            if "READY_TO_GENERATE" in query or "PROCEED_WITH_STREAMING" in query:
+                print("[DEBUG] Proceeding with streaming generation")
+            else:
+                print("[DEBUG] Direct streaming generation call")
+        
             # Initialize: Accumulate tool steps and thinking process data
             all_tool_steps = []
             thinking_process_data = {}
 
-            # Save user message
-            if self.conversation_id and self.user_id:
-                MongoDB.save_message(
-                    conversation_id=self.conversation_id,
-                    user_id=self.user_id,
-                    sender='user',
-                    text=query
-                )
-                print(f"[DEBUG] User message saved to MongoDB: {query}")
+            # # Save user message
+            # if self.conversation_id and self.user_id:
+            #     MongoDB.save_message(
+            #         conversation_id=self.conversation_id,
+            #         user_id=self.user_id,
+            #         sender='user',
+            #         text=query
+            #     )
+            #     print(f"[DEBUG] User message saved to MongoDB: {query}")
             
-            # Store user query in Pinecone
-            store_in_pinecone(
-                agent_type="pitch-deck", 
-                role="user", 
-                text=query,
-                user_id=self.user_id,
-                conversation_id=self.conversation_id
-            )
-            print(f"[DEBUG] User message stored in Pinecone")
+            # # Store user query in Pinecone
+            # store_in_pinecone(
+            #     agent_type="pitch-deck", 
+            #     role="user", 
+            #     text=query,
+            #     user_id=self.user_id,
+            #     conversation_id=self.conversation_id
+            # )
+            # print(f"[DEBUG] User message stored in Pinecone")
             
             # STEP 1: REAL MODEL THINKING ABOUT THE REQUEST
             yield {
@@ -1309,25 +1252,40 @@ Always prioritize using the tool over giving generic advice."""
                 "data": extracted_info,
                 "status": "info_extracted"
             }
-            
-            # Check if we need more info
+
+
+            project_match = None
             if not self.pitch_info.get("business_name"):
-                comprehensive_questions = self.ask_comprehensive_pitch_questions()
-                
-                yield {
-                    "type": "complete",
-                    "status": "awaiting_input",
-                    "message": comprehensive_questions,
-                    "final_data": {
-                        "search_results": formatted_results,
-                        "search_keywords": search_keywords,
-                        "inspiration_images": inspiration_images,
-                        "tool_steps": all_tool_steps,
-                        "thinking_process": thinking_process_data
-                    }
-                }
-                return
+            # Auto-extract business name from query if possible
+                project_match = re.search(r"project name is ['\"]([^'\"]+)['\"]", query)
+
+                if project_match:
+                    self.pitch_info["business_name"] = project_match.group(1)
+                else:
+                    # Use generic name if not found
+                    self.pitch_info["business_name"] = "My Project"
             
+            print(f"[DEBUG] Auto-completed business_name to: {self.pitch_info['business_name']}")
+
+            # Auto-complete other missing critical fields
+            if not self.pitch_info.get("target_audience"):
+                self.pitch_info["target_audience"] = "Stakeholders and evaluators"
+
+            if not self.pitch_info.get("industry"):
+                self.pitch_info["industry"] = "Technology"
+
+            if not self.pitch_info.get("presentation_title"):
+                self.pitch_info["presentation_title"] = f"{self.pitch_info.get('business_name', 'Project')} Presentation"
+
+            # Auto-extract info from query if possible
+            if not self.pitch_info.get("problem_statement") and "where" in query.lower():
+                problem_statement = query.split("where")[1].strip()
+                self.pitch_info["problem_statement"] = problem_statement
+                
+            if not self.pitch_info.get("solution"):
+                self.pitch_info["solution"] = f"{self.pitch_info.get('business_name', 'This solution')} solves the problem with an innovative approach"
+
+                
             await asyncio.sleep(0.3)
             
             # STEP 5: AUTO-COMPLETION
@@ -1423,19 +1381,21 @@ Always prioritize using the tool over giving generic advice."""
             # STEP 7: SLIDES GENERATION
             yield {
                 "type": "tool_start",
-                "tool_name": "Gamma AI Slides Generator",
-                "message": "✨ Generating your pitch deck with Gamma AI...",
+                "tool_name": "AI Slides Generator",
+                "message": "✨ Generating your pitch deck with AI...",
                 "status": "generating_slides"
             }
             
             # WAIT FOR ACTUAL SLIDES GENERATION TO COMPLETE
             slides_result = generate_slides_gamma(self.pitch_info, self.selectedTemplate)
             
+            # Replace the section around line 1469 that handles slides generation:
+
             if slides_result["type"] == "slides_generated":
                 # ACCUMULATE: Add final tool step
                 all_tool_steps.append({
                     "type": "tool_result",
-                    "name": "Gamma AI Slides Generator",
+                    "name": "AI Slides Generator",
                     "message": "✅ Pitch deck generated successfully!",
                     "status": "completed",
                     "data": {
@@ -1447,7 +1407,7 @@ Always prioritize using the tool over giving generic advice."""
                 
                 yield {
                     "type": "tool_result",
-                    "tool_name": "Gamma AI Slides Generator",
+                    "tool_name": "AI Slides Generator",
                     "message": "✅ Pitch deck generated successfully!",
                     "status": "slides_generated"
                 }
@@ -1457,30 +1417,7 @@ Always prioritize using the tool over giving generic advice."""
                 # Final response with slides
                 self.last_generated_slides = slides_result["slides_url"]
                 
-                yield {
-                    "type": "slides_generated",
-                    "message": slides_result["message"],
-                    "slides_url": slides_result["slides_url"],
-                    "business_info": slides_result["business_info"],
-                    "status": "complete"
-                }
-                
-                # SEND COMPLETE EVENT WITH ALL ACCUMULATED DATA
-                yield {
-                    "type": "complete",
-                    "status": "complete",
-                    "message": slides_result["message"],
-                    "final_data": {
-                        "slides_url": slides_result["slides_url"],
-                        "business_info": slides_result["business_info"],
-                        "search_results": formatted_results,
-                        "search_keywords": search_keywords,
-                        "inspiration_images": inspiration_images,
-                        "tool_steps": all_tool_steps,
-                        "thinking_process": thinking_process_data
-                    }
-                }
-                
+                # IMPORTANT: Save to database BEFORE returning
                 try:
                     final_message_data = {
                         "sender": "agent",
@@ -1503,6 +1440,18 @@ Always prioritize using the tool over giving generic advice."""
                         print(f"[DEBUG] Failed to save final message: {save_result['message']}")
                 except Exception as save_error:
                     print(f"[DEBUG] Error saving final message: {str(save_error)}")
+                
+                # Now send the slides_generated event
+                yield {
+                    "type": "slides_generated",
+                    "message": slides_result["message"],
+                    "slides_url": slides_result["slides_url"],
+                    "business_info": slides_result["business_info"],
+                    "status": "complete"
+                }
+                
+                # Return after saving data and sending the final event
+                return
                 
             else:
                 yield {
