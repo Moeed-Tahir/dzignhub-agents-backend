@@ -337,7 +337,7 @@ Make it visually appealing and professional for {target_audience}."""
             print("[DEBUG] Maximum polling attempts reached without completion")
             return {
                 "type": "partial_success",
-                "message": f"Your presentation is still being generated. You can view it at {gamma_url} when it's ready (it may take a few more moments to complete).",
+                "message": f"Your presentation is still being generated. It may take a few more moments to complete to show here.",
                 "slides_url": gamma_url,
                 "business_info": info
             }
