@@ -30,6 +30,18 @@ class ChatRequest(BaseModel):
             return None
         return v
 
+class ChatRequestPitchDeck(BaseModel):
+    prompt: str
+    user_id: str
+    conversation_id: Optional[str] = None
+    selectedTemplate: Optional[str] = None 
+
+    @validator('conversation_id', pre=True)
+    def normalize_conversation_id(cls, v):
+        if not v or v in ['', 'null', 'undefined', 'None']:
+            return None
+        return v
+
 class NewConversationRequest(BaseModel):
     user_id: str
     agent: str
@@ -1141,7 +1153,7 @@ def generate_seo_title_pattern(prompt: str) -> str:
 
 # Pitch Deck Routes
 @router.post("/pitch-deck")
-def pitch_deck_endpoint(request: ChatRequest):
+def pitch_deck_endpoint(request: ChatRequestPitchDeck):
     """Pitch deck endpoint with automatic context handling"""
     try:
         # Create conversation if not provided
@@ -1179,11 +1191,12 @@ def pitch_deck_endpoint(request: ChatRequest):
         return {"success": False, "error": str(e)}
 
 @router.post("/pitch-deck/stream")
-async def pitch_deck_stream_endpoint(request: ChatRequest):
+async def pitch_deck_stream_endpoint(request: ChatRequestPitchDeck):
     """Pitch deck endpoint with streaming responses"""
     try:
         # Create conversation if not provided
         conversation_id = request.conversation_id
+        selectedTemplate = request.selectedTemplate
         is_new_conversation = False
         
         if conversation_id is None:
@@ -1202,7 +1215,8 @@ async def pitch_deck_stream_endpoint(request: ChatRequest):
         # Get agent
         agent = get_pitch_deck_agent(
             user_id=request.user_id,
-            conversation_id=str(conversation_id)
+            conversation_id=str(conversation_id),
+            selectedTemplate=selectedTemplate
         )
         
         # Create streaming generator

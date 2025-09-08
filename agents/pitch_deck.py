@@ -156,7 +156,7 @@ def search_conversations_by_query(query: str, user_id: str, agent_type: str = "p
         print(f"[DEBUG] Search error: {e}")
         return []
 
-def generate_slides_gamma(info: dict):
+def generate_slides_gamma(info: dict, selectedTemplate: str):
     """Generate slides with Gamma AI and return proper format for frontend"""
     
     # Validate required information
@@ -200,7 +200,7 @@ Make it visually appealing and professional for {target_audience}."""
         "inputText": input_text,
         "textMode": "condense",
         "format": "presentation",
-        "themeName": "Oasis",  # Professional theme
+        "themeName": selectedTemplate,  # Professional theme
         "numCards": 10,
         "cardSplit": "auto",
         "exportAs": "pptx",
@@ -270,7 +270,7 @@ Make it visually appealing and professional for {target_audience}."""
         
         # Set up polling parameters
         max_attempts = 12  # Maximum number of polling attempts
-        poll_interval = 5  # Time between polling attempts in seconds
+        poll_interval = 8  # Time between polling attempts in seconds
         attempts = 0
         
         gamma_url = f"https://gamma.app/view/{generation_id}"  # Default view URL
@@ -385,8 +385,9 @@ Make it visually appealing and professional for {target_audience}."""
 # Pitch Deck Agent with MongoDB
 # ---------------------------
 class PitchDeckAgent:
-    def __init__(self, user_id: str = None, conversation_id: str = None):
+    def __init__(self, user_id: str = None, conversation_id: str = None, selectedTemplate: str = None):
         self.user_id = user_id
+        self.selectedTemplate = selectedTemplate
         self.conversation_id = conversation_id
         self.agent_name = "pitch-deck"
         self.last_generated_slides = None
@@ -1049,7 +1050,7 @@ Always prioritize using the tool over giving generic advice."""
         self.save_pitch_info()
         
         # Generate pitch deck with Gamma AI
-        result = generate_slides_gamma(self.pitch_info)
+        result = generate_slides_gamma(self.pitch_info, self.selectedTemplate)
         
         # Save the generated URL
         if result["type"] == "slides_generated":
@@ -1428,7 +1429,7 @@ Always prioritize using the tool over giving generic advice."""
             }
             
             # WAIT FOR ACTUAL SLIDES GENERATION TO COMPLETE
-            slides_result = generate_slides_gamma(self.pitch_info)
+            slides_result = generate_slides_gamma(self.pitch_info, self.selectedTemplate)
             
             if slides_result["type"] == "slides_generated":
                 # ACCUMULATE: Add final tool step
@@ -1973,5 +1974,5 @@ Always prioritize using the tool over giving generic advice."""
         return articles[:8]
 
 
-def get_pitch_deck_agent(user_id: str = None, conversation_id: str = None):
-    return PitchDeckAgent(user_id, conversation_id)
+def get_pitch_deck_agent(user_id: str = None, conversation_id: str = None, selectedTemplate: str = None):
+    return PitchDeckAgent(user_id, conversation_id, selectedTemplate)
