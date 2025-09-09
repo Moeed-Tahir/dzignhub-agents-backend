@@ -359,3 +359,75 @@ class MongoDB:
         except Exception as e:
             print(f"[DEBUG] Error updating strategy preferences: {e}")
             return False
+        
+
+    @staticmethod
+    def save_user_generation(user_id: str, business_fingerprint: str, slides_url: str):
+        """Save recent generation to prevent duplicates"""
+        try:
+            from datetime import datetime, timedelta
+            
+            # Set expiration for 24 hours from now
+            expires_at = datetime.utcnow() + timedelta(hours=24)
+            
+            result = users_collection.update_one(
+                {"_id": ObjectId(user_id)},
+                {"$set": {
+                    "recentGeneration": {
+                        "businessFingerprint": business_fingerprint,
+                        "slidesUrl": slides_url,
+                        "generatedAt": datetime.utcnow(),
+                        "expiresAt": expires_at
+                    }
+                }}
+            )
+            
+            print(f"[DEBUG] Saved recent generation for user {user_id}")
+            return result.modified_count > 0
+            
+        except Exception as e:
+            print(f"[DEBUG] Error saving user generation: {e}")
+            return False
+
+    @staticmethod
+    def get_user_recent_generation(user_id: str):
+        """Get recent generation if it exists and hasn't expired"""
+        try:
+            from datetime import datetime
+            
+            user = users_collection.find_one({"_id": ObjectId(user_id)})
+            
+            if not user or "recentGeneration" not in user:
+                return None
+                
+            recent = user["recentGeneration"]
+            
+            # Check if expired
+            if recent.get("expiresAt") and recent["expiresAt"] < datetime.utcnow():
+                # Clean up expired generation
+                users_collection.update_one(
+                    {"_id": ObjectId(user_id)},
+                    {"$unset": {"recentGeneration": ""}}
+                )
+                return None
+                
+            return recent
+            
+        except Exception as e:
+            print(f"[DEBUG] Error getting user recent generation: {e}")
+            return None
+
+    @staticmethod
+    def clear_user_generation(user_id: str):
+        """Clear recent generation data"""
+        try:        
+            result = users_collection.update_one(
+                {"_id": ObjectId(user_id)},
+                {"$unset": {"recentGeneration": ""}}
+            )
+            
+            return result.modified_count > 0
+            
+        except Exception as e:
+            print(f"[DEBUG] Error clearing user generation: {e}")
+            return False
