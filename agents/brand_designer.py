@@ -16,6 +16,7 @@ import requests
 # ---------------------------
 # Pinecone Setup (same as before)
 # ---------------------------
+
 pinecone = Pinecone(api_key=PINECONE_API_KEY)
 groq_client = Groq(api_key=GROQ_API_KEY)
 INDEX_NAME = "ai-agents-memory"

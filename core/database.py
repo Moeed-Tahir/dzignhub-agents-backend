@@ -6,6 +6,7 @@ from core.config import MONGODB_URL, DATABASE_NAME
 client = MongoClient(MONGODB_URL)
 db = client[DATABASE_NAME]
 
+
 # Collections
 users_collection = db.users 
 conversations_collection = db.conversations
