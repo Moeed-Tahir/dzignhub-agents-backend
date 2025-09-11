@@ -17,6 +17,7 @@ from groq import Groq
 router = APIRouter()
 from core.config import OPENAI_API_KEY, PINECONE_API_KEY, PINECONE_ENV, GROQ_API_KEY, SEARCHAPI_KEY
 from agents.pitch_deck import get_pitch_deck_agent, search_conversations_by_query as search_pitch_deck_conversations
+from agents.super_agent import get_super_agent, search_super_agent_conversations
 
 # Request Models
 class ChatRequest(BaseModel):
@@ -354,7 +355,7 @@ def generate_conversation_title(prompt: str) -> str:
 def generate_dynamic_title(prompt: str) -> str:
     """Generate title using OpenAI (fallback to keyword-based)"""
     try:
-        openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        openai_client = OpenAI(api_key=OPENAI_API_KEY)
         
         response = openai_client.chat.completions.create(
             model="gpt-3.5-turbo",
@@ -761,7 +762,7 @@ def search_strategy_conversations(
 def generate_dynamic_strategy_title(prompt: str) -> str:
     """Generate title for strategy conversations using OpenAI (fallback to keyword-based)"""
     try:
-        openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        openai_client = OpenAI(api_key=OPENAI_API_KEY)
         
         response = openai_client.chat.completions.create(
             model="gpt-3.5-turbo",
@@ -884,7 +885,7 @@ def generate_strategy_title_pattern(prompt: str) -> str:
 def generate_dynamic_content_title(prompt: str) -> str:
     """Generate title for content creation conversations using OpenAI (fallback to keyword-based)"""
     try:
-        openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        openai_client = OpenAI(api_key=OPENAI_API_KEY)
         
         response = openai_client.chat.completions.create(
             model="gpt-3.5-turbo",
@@ -1006,7 +1007,7 @@ def generate_content_title_pattern(prompt: str) -> str:
 def generate_dynamic_seo_title(prompt: str) -> str:
     """Generate title for SEO conversations using OpenAI (fallback to keyword-based)"""
     try:
-        openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        openai_client = OpenAI(api_key=OPENAI_API_KEY)
         
         response = openai_client.chat.completions.create(
             model="gpt-3.5-turbo",
@@ -1299,7 +1300,7 @@ def search_pitch_deck_conversations_endpoint(
 def generate_dynamic_pitch_deck_title(prompt: str) -> str:
     """Generate title for pitch deck conversations using OpenAI (fallback to keyword-based)"""
     try:
-        openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        openai_client = OpenAI(api_key=OPENAI_API_KEY)
         
         response = openai_client.chat.completions.create(
             model="gpt-3.5-turbo",
@@ -1416,3 +1417,266 @@ def generate_pitch_deck_title_pattern(prompt: str) -> str:
     except Exception as e:
         print(f"[DEBUG] Pitch deck title pattern generation error: {e}")
         return "Pitch Deck"
+    
+
+
+
+# Add title generation helper function for super agent
+def generate_dynamic_super_agent_title(prompt: str) -> str:
+    """Generate title for super agent conversations using OpenAI (fallback to keyword-based)"""
+    try:
+        openai_client = OpenAI(api_key=OPENAI_API_KEY)
+        
+        response = openai_client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "Generate a short, descriptive title (3-5 words) for a comprehensive content generation conversation based on the user's request. Focus on the main task or content type."},
+                {"role": "user", "content": f"User request: {prompt}"}
+            ],
+            max_tokens=20,
+            temperature=0.3
+        )
+        
+        ai_title = response.choices[0].message.content.strip()
+        
+        # Clean up the title (remove quotes, etc.)
+        ai_title = ai_title.replace('"', '').replace("'", '')
+        
+        # Validate length
+        if len(ai_title) > 50:
+            raise Exception("Title too long")
+            
+        print(f"[DEBUG] Generated AI super agent title: {ai_title}")
+        return ai_title
+        
+    except Exception as e:
+        print(f"[DEBUG] AI super agent title generation failed: {e}, using keyword-based")
+        return generate_super_agent_title_pattern(prompt)  # Fallback to keyword-based
+
+def generate_super_agent_title_pattern(prompt: str) -> str:
+    """Generate title for super agent conversations using keyword patterns"""
+    try:
+        prompt_clean = prompt.strip().lower()
+        
+        title_patterns = {
+            # Content Generation
+            "generate content": "Content Generation",
+            "create content": "Content Creation",
+            "write content": "Content Writing",
+            "content creation": "Content Creation",
+            "content generation": "Content Generation",
+            
+            # Design & Assets
+            "generate logo": "Logo Generation",
+            "create logo": "Logo Creation",
+            "design logo": "Logo Design",
+            "generate design": "Design Generation",
+            "create design": "Design Creation",
+            
+            # Presentations
+            "generate slides": "Slide Generation",
+            "create slides": "Slide Creation",
+            "pitch deck": "Pitch Deck Creation",
+            "presentation": "Presentation Creation",
+            
+            # Business Content
+            "business plan": "Business Plan",
+            "marketing strategy": "Marketing Strategy",
+            "brand strategy": "Brand Strategy",
+            "product description": "Product Description",
+            
+            # General Generation
+            "generate": "Content Generation",
+            "create": "Content Creation",
+            "make": "Content Creation",
+            "build": "Content Building",
+            "design": "Design Creation"
+        }
+        
+        # Check for specific patterns (most specific first)
+        for keyword, title in title_patterns.items():
+            if keyword in prompt_clean:
+                return title
+        
+        # Extract main action from prompt
+        words = prompt.split()
+        if len(words) <= 3:
+            return prompt.title()
+        else:
+            # Take first 2-3 words that seem generation-related
+            generation_words = []
+            for word in words[:4]:
+                if word.lower() in ['generate', 'create', 'make', 'build', 'design', 'write', 'produce']:
+                    continue
+                generation_words.append(word)
+                if len(generation_words) >= 2:
+                    break
+            
+            if generation_words:
+                title = " ".join(generation_words).title()
+                if "generation" not in title.lower() and "creation" not in title.lower():
+                    title += " Generation"
+                return title
+        
+        return "Content Generation"
+        
+    except Exception as e:
+        print(f"[DEBUG] Super agent title pattern generation error: {e}")
+        return "Super Agent Chat"
+
+# Super Agent Routes
+@router.post("/super-agent")
+def super_agent_endpoint(request: ChatRequest):
+    """Super agent endpoint with automatic context handling"""
+    try:
+        # Create conversation if not provided
+        conversation_id = request.conversation_id
+        is_new_conversation = False
+        
+        if not conversation_id:
+            # Use AI-powered title generation with keyword fallback
+            dynamic_title = generate_dynamic_super_agent_title(request.prompt)
+            
+            conversation_id = MongoDB.create_conversation(
+                user_id=request.user_id,
+                agent="super-agent", 
+                title=dynamic_title
+            )
+            is_new_conversation = True
+
+        # Get agent and handle query
+        agent = get_super_agent(
+            user_id=request.user_id,
+            conversation_id=conversation_id
+        )
+        
+        # For super agent, we'll use the streaming response but collect it
+        async def collect_response():
+            async for chunk in agent.stream_response(request.prompt):
+                if chunk.get("type") == "content_response":
+                    return chunk.get("message", "")
+            return "I apologize, but I encountered an issue generating your content."
+        
+        # Run the async function
+        response = asyncio.run(collect_response())
+        
+        return {
+            "success": True,
+            "response": response,
+            "conversation_id": conversation_id,
+            "is_new_conversation": is_new_conversation,
+            "agent": "super-agent"
+        }
+    except Exception as e:
+        print(f"Error in super agent endpoint: {e}")
+        return {"success": False, "error": str(e)}
+
+@router.post("/super-agent/stream")
+async def super_agent_stream_endpoint(request: ChatRequest):
+    """Super agent endpoint with streaming responses"""
+    try:
+        # Create conversation if not provided
+        conversation_id = request.conversation_id
+        is_new_conversation = False
+        
+        if conversation_id is None:
+            dynamic_title = generate_dynamic_super_agent_title(request.prompt)
+            conversation_id = MongoDB.create_conversation(
+                user_id=request.user_id,
+                agent="super-agent", 
+                title=dynamic_title
+            )
+            print("New conversation id: ", conversation_id)
+            is_new_conversation = True
+
+        if not conversation_id:
+            raise Exception("Failed to create or retrieve conversation ID")
+
+        # Get agent
+        agent = get_super_agent(
+            user_id=request.user_id,
+            conversation_id=str(conversation_id)
+        )
+        
+        # Create streaming generator
+        async def generate_stream():
+            try:
+                # Send initial response
+                initial_data = {
+                    "type": "conversation_info",
+                    "conversation_id": conversation_id,
+                    "is_new_conversation": is_new_conversation,
+                    "agent": "super-agent"
+                }
+                yield f"data: {json.dumps(initial_data)}\n\n"
+                
+                # Stream the agent response
+                async for chunk in agent.stream_response(request.prompt):
+                    print(f"[DEBUG] Streaming chunk: {chunk.get('type', 'unknown')}")
+                    yield f"data: {json.dumps(chunk)}\n\n"
+                
+                # Send completion signal
+                completion_data = {"type": "complete"}
+                yield f"data: {json.dumps(completion_data)}\n\n"
+                
+            except Exception as e:
+                error_data = {"type": "error", "message": str(e)}
+                yield f"data: {json.dumps(error_data)}\n\n"
+
+        return StreamingResponse(
+            generate_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "*",
+            }
+        )
+        
+    except Exception as e:
+        print(f"Error in super agent stream endpoint: {e}")
+        return {"success": False, "error": str(e)}
+
+@router.get("/super-agent")
+def super_agent_status():
+    """Get super agent status"""
+    return {
+        "success": True,
+        "message": "Super Agent is running!",
+        "agent": "super-agent",
+        "version": "1.0.0",
+        "capabilities": [
+            "Content Generation",
+            "Web Research",
+            "Design Inspiration",
+            "Comprehensive Responses",
+            "Multi-format Output"
+        ]
+    }
+
+# Super agent-specific search endpoint
+@router.get("/super-agent/search")
+def search_super_agent_conversations_endpoint(
+    query: str = Query(..., description="Search query"),
+    user_id: str = Query(..., description="User ID"),
+    limit: int = Query(10, description="Number of results to return")
+):
+    """Search super agent conversations using vector similarity"""
+    try:
+        search_results = search_super_agent_conversations(
+            query=query,
+            user_id=user_id,
+            agent_type="super-agent",
+            top_k=limit
+        )
+        
+        return {
+            "success": True,
+            "results": search_results,
+            "count": len(search_results),
+            "query": query
+        }
+    except Exception as e:
+        print(f"[DEBUG] Super agent search route error: {e}")
+        return {"success": False, "error": str(e)}
